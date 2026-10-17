@@ -2,6 +2,7 @@
   "name": "memomind-md-reader",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Obsidian-style Markdown reader for MemoMind glasses with head-tracked scrolling and link navigation",
   "type": "module",
   "scripts": {

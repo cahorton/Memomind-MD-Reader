@@ -108,3 +108,9 @@ to this folder (or pass `--sdk`). Then:
 - Default thresholds are guesses until tried on a real head.
 - Grey levels (`0xDB` dim text, `0x92` guide) assume the 8-bit LVGL colour maps
   to brightness. Check them on the display.
+
+## License
+
+MIT, see [LICENSE](LICENSE). This covers the code in this repository only.
+MemoMind's SDK, which the build copies in from your SDK checkout, stays under
+the [MemoMind Open Platform Terms](https://open-platform.memo-mind.com/terms).
