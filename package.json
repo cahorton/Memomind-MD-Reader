@@ -1,0 +1,15 @@
+{
+  "name": "memomind-md-reader",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Obsidian-style Markdown reader for MemoMind glasses with head-tracked scrolling and link navigation",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/",
+    "build:glass": "cd ../plugin-open-platform/GlassSDK && python3 build.py build --project ../../Memomind-MD-Reader/glass/md_reader",
+    "studio": "node scripts/studio.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

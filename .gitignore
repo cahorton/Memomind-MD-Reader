@@ -1,0 +1,6 @@
+.build/
+glass/md_reader/.build/
+samples/vault.zip
+node_modules/
+.DS_Store
+phone/md-reader/vendor/

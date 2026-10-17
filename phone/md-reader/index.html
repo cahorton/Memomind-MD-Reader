@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+    <title>MD Reader</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">MEMOMIND</p>
+        <h1>MD Reader</h1>
+      </div>
+      <button id="bridge-state" class="connection" type="button">Connecting…</button>
+    </header>
+
+    <main class="layout">
+      <aside class="library">
+        <div class="section-heading">
+          <h2>Vault</h2>
+          <span id="note-count">0 notes</span>
+        </div>
+        <div class="import-row">
+          <button id="import-md" class="primary" type="button" disabled>Add .md files</button>
+          <button id="import-zip" type="button" disabled>Add vault .zip</button>
+        </div>
+        <input id="search" type="search" placeholder="Filter notes" autocomplete="off">
+        <nav id="note-list" class="note-list" aria-label="Notes"></nav>
+        <details class="sources">
+          <summary>Imported files</summary>
+          <div id="source-list" class="source-list"></div>
+        </details>
+      </aside>
+
+      <section class="reader">
+        <div id="empty-state" class="empty-state">
+          <h2>Pick a note to read on your glasses</h2>
+          <p>Look up to page down, look down to page up. Turn your head left or right to pick a link, double-click to open it, long-press to go back.</p>
+        </div>
+
+        <div id="reader" hidden>
+          <div class="reader-heading">
+            <button id="back" type="button" disabled>Back</button>
+            <div class="title-block">
+              <h2 id="note-title"></h2>
+              <p id="breadcrumbs" class="breadcrumbs"></p>
+            </div>
+            <span id="page-info" class="page-info"></span>
+          </div>
+          <article id="preview" class="preview" aria-label="Note text with the glasses page highlighted"></article>
+        </div>
+
+        <details class="settings" open>
+          <summary>Head control</summary>
+          <div class="settings-grid">
+            <label class="toggle"><input id="head-enabled" type="checkbox"> Head scrolling</label>
+            <label class="toggle"><input id="tilt-guide" type="checkbox"> Tilt guide on glasses</label>
+            <label>Tilt to page <output id="pitch-threshold-value"></output>
+              <input id="pitch-threshold" type="range" min="5" max="30" step="1">
+            </label>
+            <label>Hold before paging <output id="dwell-value"></output>
+              <input id="dwell" type="range" min="0" max="1000" step="50">
+            </label>
+            <label>Repeat while held <output id="repeat-value"></output>
+              <input id="repeat" type="range" min="600" max="3000" step="100">
+            </label>
+            <label>Turn needed for links <output id="turn-value"></output>
+              <input id="turn" type="range" min="40" max="400" step="10">
+            </label>
+            <label class="toggle"><input id="invert-pitch" type="checkbox"> Swap up/down</label>
+            <label class="toggle"><input id="invert-yaw" type="checkbox"> Swap left/right</label>
+            <label class="toggle"><input id="large-font" type="checkbox"> Large glasses font</label>
+          </div>
+        </details>
+
+        <p id="status" class="status">Starting…</p>
+      </section>
+    </main>
+
+    <script type="module" src="./plugin.js"></script>
+  </body>
+</html>

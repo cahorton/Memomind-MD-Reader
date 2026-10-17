@@ -1,0 +1,11 @@
+{
+  "id": "com.memomind.md-reader",
+  "name": "MD Reader",
+  "version": 1,
+  "abi_version": 256,
+  "provides": {
+    "protocols": [
+      { "id": "memomind.md-reader", "version": "1.0" }
+    ]
+  }
+}
