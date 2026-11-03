@@ -438,6 +438,7 @@ test('continuous mode keeps scrolling while the look is held, up to a 10 s pause
   const { sim, controller, run, state } = await harness();
   try {
     await controller.open('Long.md');
+    await run('TICK 2000'); // page turns wait 2 s after a note opens
     await controller.applySettings({ continuous: true, pauseMs: 10000 });
     // Confirm neutral the way a reader does: one look down and back.
     await run('IMU -20 0 0 0');
@@ -746,6 +747,7 @@ test('one nod opens the highlighted link; a nod never turns the page', async () 
     await run('IMU 0 0 0 0');
     await run('TICK 1000');
     await controller.open('Long.md');
+    await run('TICK 2000'); // page turns wait 2 s after a note opens
     await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
     assert.equal((await state()).selectedText, 'Short');
     await run('IMU -20 0 0 -250');
@@ -759,6 +761,7 @@ test('one nod opens the highlighted link; a nod never turns the page', async () 
     await run('IMU 0 0 0 0');
     await run('TICK 1000');
     await controller.open('Long.md');
+    await run('TICK 2000'); // page turns wait 2 s after a note opens
     await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
     await run('IMU 0 0 0 -250');
     await run('TICK 80');
@@ -771,6 +774,7 @@ test('one nod opens the highlighted link; a nod never turns the page', async () 
     await run('IMU 0 0 0 0');
     await run('TICK 1000');
     await controller.open('Long.md');
+    await run('TICK 2000'); // page turns wait 2 s after a note opens
     await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
     await run('IMU 0 0 0 -250');
     await run('TICK 80');
@@ -785,6 +789,7 @@ test('one nod opens the highlighted link; a nod never turns the page', async () 
     await run('IMU 0 0 0 0');
     await run('TICK 1000');
     await controller.open('Long.md');
+    await run('TICK 2000'); // page turns wait 2 s after a note opens
     await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
     await run('IMU -20 0 0 -250');
     await run('TICK 80');
@@ -857,6 +862,7 @@ test('the tilt centre stays put while reading: no ratchet after page turns, no d
   const { sim, controller, run, state } = await harness();
   try {
     await controller.open('Long.md');
+    await run('TICK 2000'); // page turns wait 2 s after a note opens
     // Page down five times, each time coming back up 5 degrees short.
     for (let page = 1; page <= 5; page += 1) {
       await run('IMU -20 0 0 0');
@@ -994,6 +1000,33 @@ test('the tutorial: page to the end of Start here, pick between its two links, o
     view = await state();
     assert.equal(view.title, '1 Start here');
     assert.equal(view.selectedText, 'Links and going back');
+  } finally {
+    sim.close();
+  }
+});
+
+test('a note opened mid-nod is not paged by the rest of the nod', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Short.md');
+    await run('TICK 2000');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    assert.equal((await state()).selectedText, 'Long > Section 33');
+    // Nod: up then down opens the link; the head carries on down and stays.
+    await run('IMU 0 0 0 200');
+    await run('TICK 120');
+    await run('IMU -20 0 0 -200');
+    await run('TICK 120');
+    let view = await state();
+    assert.equal(view.title, 'Long');
+    const landed = view.pageIndex;
+    await run('IMU -20 0 0 0');
+    await run('TICK 1700');
+    assert.equal((await state()).pageIndex, landed, 'no page turn in the first 2 s');
+    // After the pause, the held look down pages as usual.
+    await run('TICK 800');
+    assert.equal((await state()).pageIndex, landed + 1);
   } finally {
     sim.close();
   }

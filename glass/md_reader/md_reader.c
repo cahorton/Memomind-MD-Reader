@@ -31,7 +31,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 12U
+#define GLASSES_VERSION 13U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -93,6 +93,9 @@
  * is not mistaken for a look down. */
 #define OPEN_NOD_SWINGS 2U
 #define NOD_GUARD_MS 1000U
+/* After a note opens (a link, going back, a jump), page turns wait this long:
+ * the end of the nod that opened it must not page the new note. */
+#define OPEN_GUARD_MS 2000U
 /* The link-open nod may be slower: down and back up within this long. */
 #define OPEN_NOD_GAP_MS 1000U
 /* Nods are gentler than head turns, so they have their own speed threshold. */
@@ -278,6 +281,7 @@ typedef struct {
     /* Phone "Recentre tilt": counts down, then recalibrates neutral. */
     uint32_t recentre_ms;
     uint8_t recentre_seconds;
+    uint32_t open_guard_ms;
     int8_t tilt_zone;
     uint8_t tilt_fired;
     uint32_t zone_elapsed;
@@ -1237,6 +1241,7 @@ static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
         return;
     }
     self->return_window = self->return_window > dt ? self->return_window - dt : 0U;
+    if (self->open_guard_ms != 0U) return;
     delta = (int16_t)(((int32_t)pitch * PITCH_SCALE - self->neutral_fp) /
                       PITCH_SCALE);
     if (self->tilt_zone == 0) {
@@ -1617,6 +1622,8 @@ static bool handle_open(md_reader_t *self, const uint8_t *data, uint32_t length)
     if (!same_doc && self->auto_scroll != 0U) set_autoscroll(self, false, 0);
     /* "Opening..." or "Back" has done its job once the note arrives. */
     self->notice_elapsed = 0U;
+    leave_zone(self, false);
+    self->open_guard_ms = OPEN_GUARD_MS;
     set_exit(self, false);
     seek(self, target < total ? target : 0U, read_u16(data + 18));
     return true;
@@ -2113,6 +2120,7 @@ static gm_plugin_result_t on_start(void *opaque)
     self->arrow_elapsed = 0U;
     self->confirm_on_calibration = 0U;
     self->recentre_ms = 0U;
+    self->open_guard_ms = 0U;
     self->nod_threshold = DEFAULT_NOD_THRESHOLD;
     self->brightness_lock = 0U;
     self->brightness_level = 0U;
@@ -2183,6 +2191,8 @@ static void on_loop(void *opaque, uint32_t elapsed_ms)
     } else if (self->pending == PENDING_SEEK) {
         continue_seek(self);
     }
+    self->open_guard_ms = self->open_guard_ms > elapsed_ms
+        ? self->open_guard_ms - elapsed_ms : 0U;
     update_autoscroll(self, elapsed_ms);
     /* While the recentre countdown runs, head moves (looking up from the
      * phone) must not page. */

@@ -53,6 +53,9 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
   creep lower page after page.)
   - Coming back from a page turn, tilts are ignored for 0.6 s, so the return
     swing never pages the other way.
+  - After a note opens (a link, going back, or a jump from the phone), page
+    turns wait 2 s, so the end of the nod that opened it does not page the
+    new note.
   - One safety net remains for a start taken while looking down at the phone:
     until neutral is confirmed (a click, a Recentre, or coming back from any
     page turn), a tilt held 2.5 s past its page turn becomes the new
