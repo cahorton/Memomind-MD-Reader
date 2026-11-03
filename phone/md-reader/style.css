@@ -44,6 +44,7 @@ input[type="search"] { width: 100%; margin-top: 12px; padding: 8px 10px; border:
 .note-card strong, .note-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-card small { color: #6f8c82; font-size: 11px; margin-top: 2px; }
 .note-card.active { border-color: #4fd29f; box-shadow: inset 3px 0 #4fd29f; }
+button.quiet { margin-top: 10px; padding: 6px 10px; border-color: #1d332d; background: none; color: #8aa69c; font-size: 12px; }
 .sources { margin-top: 16px; color: #8aa69c; font-size: 12px; }
 .sources summary { cursor: pointer; }
 .source-list { display: grid; gap: 6px; margin-top: 8px; }

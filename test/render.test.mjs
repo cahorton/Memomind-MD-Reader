@@ -163,3 +163,25 @@ test('the version shown on the phone matches the manifests', async () => {
   assert.deepEqual(decodeEvent(Uint8Array.from([1, 5, 0, 0, 0, 3, glassesVersion])),
     { type: 'hello', session: 3, glassesVersion });
 });
+
+test('the built-in tutorial links only to itself, and its heading links land', async () => {
+  const { TUTORIAL_NOTES, TUTORIAL_START, TUTORIAL_FOLDER } = await import('../phone/md-reader/tutorial.js');
+  const paths = Object.keys(TUTORIAL_NOTES);
+  assert.ok(paths.includes(TUTORIAL_START));
+  assert.ok(paths.every((path) => path.startsWith(`${TUTORIAL_FOLDER}/`)));
+  for (const [path, source] of Object.entries(TUTORIAL_NOTES)) {
+    const rendered = renderMarkdown(source);
+    assert.ok(rendered.links.length >= 1, `${path} has links`);
+    for (const link of rendered.links) {
+      const target = resolveNotePath(link.target.note, path, paths);
+      assert.ok(target, `${path}: [[${link.target.note}]] resolves`);
+      if (link.target.heading) {
+        const offset = findHeadingOffset(renderMarkdown(TUTORIAL_NOTES[target]), link.target.heading);
+        assert.ok(offset > 0, `${path}: #${link.target.heading} exists in ${target}`);
+      }
+    }
+  }
+  // The continuous-scrolling part is long enough to practise on.
+  const continuous = paths.find((path) => path.includes('Continuous'));
+  assert.ok(renderMarkdown(TUTORIAL_NOTES[continuous]).text.length > 2500);
+});

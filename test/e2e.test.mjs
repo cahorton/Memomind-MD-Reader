@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { decodeEvent } from '../phone/md-reader/md-protocol.js';
 import { ReaderController } from '../phone/md-reader/reader-controller.js';
+import { TUTORIAL_NOTES, TUTORIAL_START } from '../phone/md-reader/tutorial.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const simPath = join(root, '.build', 'host_sim');
@@ -38,6 +39,7 @@ function longNote() {
 const notes = {
   'Short.md': '# Short\n\nGo to [[Other|the other note]] or [[Long#Section 33]].\nMissing: [[Nowhere]].\n',
   'Other.md': '# Other\n\nBack to [[Short]].\n',
+  'TopLink.md': '[[Other]] is the first word of this note.\n',
   'Wrapped.md': '# Wrapped\n\nThis sentence runs on long enough to [[Other|the other note with a long name]] wraps.\n',
   'Long.md': longNote(),
 };
@@ -73,10 +75,10 @@ class Sim {
   }
 }
 
-async function harness({ startPitch = 0 } = {}) {
+async function harness({ startPitch = 0, vaultNotes = notes } = {}) {
   const sim = new Sim();
   const outbox = [];
-  const vault = { paths: Object.keys(notes), readNote: async (path) => notes[path] };
+  const vault = { paths: Object.keys(vaultNotes), readNote: async (path) => vaultNotes[path] };
   const diagnostics = [];
   const controller = new ReaderController({
     vault,
@@ -689,7 +691,8 @@ test('the highlighted link gets a drawn box (or inverted text) around each of it
     let view = await state();
     assert.equal(view.selectedText, 'the other note');
     // "Go to " is 6 characters of 11 px on line 2 (29 px lines, 24 px font).
-    assert.deepEqual(view.boxes, [{ x: 66 - 3, y: 2 * 29 - 2, w: 14 * 11 + 6, h: 24 + 4, text: '' }]);
+    // Boxes are placed on the screen: the text area starts at x 20, y 40.
+    assert.deepEqual(view.boxes, [{ x: 20 + 66 - 3, y: 40 + 2 * 29 - 2, w: 14 * 11 + 6, h: 24 + 4, text: '' }]);
 
     await controller.applySettings({ linkHighlight: 'inverted' });
     view = await state();
@@ -941,6 +944,56 @@ test('tapping the phone text jumps the glasses to that spot, keeping the layout'
     view = await state();
     assert.equal(view.complete, 1);
     assert.equal(view.pageIndex, view.pageCount - 1);
+  } finally {
+    sim.close();
+  }
+});
+
+test('a link on the first line keeps the top of its box above the text', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('TopLink.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    const view = await state();
+    assert.equal(view.selectedText, 'Other');
+    const [box] = view.boxes;
+    // The text area starts at y 40; the box starts 2 px above it, below the
+    // 30 px title line, instead of being cut off at the text area's edge.
+    assert.equal(box.y, 38);
+    assert.ok(box.y >= 30 && box.y < view.viewportTop);
+  } finally {
+    sim.close();
+  }
+});
+
+test('the tutorial: page to the end of Start here, pick between its two links, open one, come back', async () => {
+  const { sim, controller, run, state } = await harness({ vaultNotes: TUTORIAL_NOTES });
+  try {
+    await controller.open(TUTORIAL_START);
+    let view = await state();
+    assert.equal(view.title, '1 Start here');
+    for (let guard = 0; guard < 20 && !view.complete || view.pageIndex + 1 < view.pageCount; guard += 1) {
+      await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
+      view = await state();
+    }
+    assert.equal(view.links, 2);
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    assert.equal((await state()).selectedText, 'Links and going back');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    assert.equal((await state()).selectedText, 'Continuous scrolling');
+    await run(`BTN ${BUTTON.left} ${ACTION.trigger}`);
+    await run('IMU 0 0 0 -200');
+    await run('TICK 120');
+    await run('IMU 0 0 0 200');
+    await run('TICK 120');
+    view = await state();
+    assert.equal(view.title, '2 Links and going back');
+    assert.equal(view.links >= 4, true);
+    await run(`BTN ${BUTTON.primary} ${ACTION.long}`);
+    await run(`BTN ${BUTTON.primary} ${ACTION.release}`);
+    view = await state();
+    assert.equal(view.title, '1 Start here');
+    assert.equal(view.selectedText, 'Links and going back');
   } finally {
     sim.close();
   }

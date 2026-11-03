@@ -31,7 +31,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 11U
+#define GLASSES_VERSION 12U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -821,8 +821,11 @@ static void apply_selection(md_reader_t *self)
             gm_plugin_lvgl_obj_t *box = self->select_box[used];
             gm_plugin_lvgl_obj_t *text = self->select_text[used];
             if (!link_segment(self, link, line, &from, &to, &x0, &x1)) continue;
-            self->ui->obj_set_pos(box, x0 - BOX_PAD_X,
-                                  (int16_t)(line * self->line_height - BOX_PAD_Y));
+            /* Boxes live on the screen root, not in the clipping text
+             * viewport, so a link on the first line keeps its top edge. */
+            self->ui->obj_set_pos(box, self->viewport_x + x0 - BOX_PAD_X,
+                                  (int16_t)(self->viewport_y + line * self->line_height -
+                                            BOX_PAD_Y));
             self->ui->obj_set_size(box, x1 - x0 + BOX_PAD_X * 2,
                                    self->font_height + BOX_PAD_Y * 2);
             self->ui->style_set(box, GM_PLUGIN_LVGL_STYLE_BG_OPA,
@@ -2001,7 +2004,7 @@ static gm_plugin_result_t create_ui(md_reader_t *self)
     /* Drawn by the plugin rather than with LVGL's label text selection, which
      * showed only the dark text (no background) on the glasses. */
     for (uint16_t index = 0U; index < MAX_SELECT_BOXES; ++index) {
-        gm_plugin_lvgl_obj_t *box = self->ui->obj_create(self->viewport);
+        gm_plugin_lvgl_obj_t *box = self->ui->obj_create(self->root);
         gm_plugin_lvgl_obj_t *text = box != 0 ? self->ui->label_create(box) : 0;
         gm_plugin_lvgl_style_value_t font = {0};
         if (box == 0 || text == 0) return GM_PLUGIN_ENOMEM;

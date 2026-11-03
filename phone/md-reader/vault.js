@@ -1,6 +1,7 @@
 // The vault: imported .md files and zipped vaults kept in the App's private
 // file storage, exposed as one set of note paths.
 
+import { TUTORIAL_NOTES } from './tutorial.js';
 import { noteTitle, zipPrefix } from './vault-links.js';
 
 const MAX_DIRECTORY_BYTES = 8 * 1024 * 1024;
@@ -14,6 +15,8 @@ export class Vault {
     this.sources = [];
     this.notes = new Map();
     this.textCache = new Map();
+    // The built-in tutorial folder, until the user hides it.
+    this.tutorialHidden = false;
   }
 
   get paths() {
@@ -47,6 +50,10 @@ export class Vault {
       } catch (error) {
         source.error = error.message;
       }
+    }
+    if (!this.tutorialHidden) {
+      const tutorial = { notes: 0 };
+      for (const [path, text] of Object.entries(TUTORIAL_NOTES)) this.addNote(path, { builtin: text }, tutorial);
     }
     return this;
   }
@@ -87,6 +94,7 @@ export class Vault {
     if (this.textCache.has(path)) return this.textCache.get(path);
     const note = this.notes.get(path);
     if (!note) throw new Error(`Note not found: ${path}`);
+    if (note.builtin !== undefined) return note.builtin;
     const bytes = note.archive
       ? await note.archive.read(note.entry, MAX_NOTE_BYTES)
       : await this.readRange(note.file.fileId, 0, note.file.size);

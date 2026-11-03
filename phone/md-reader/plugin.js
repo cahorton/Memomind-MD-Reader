@@ -4,6 +4,7 @@ import { ReaderController, defaultSettings } from './reader-controller.js';
 import { Vault } from './vault.js';
 import { utf8Length } from './md-render.js';
 import { PHONE_VERSION } from './version.js';
+import { TUTORIAL_FOLDER, TUTORIAL_START } from './tutorial.js';
 import { browseRoot, compareNames, dirname, listFolder, noteTitle } from './vault-links.js';
 
 const SETTINGS_KEY = 'md-reader.settings.v1';
@@ -13,6 +14,7 @@ const STATE_KEY = 'md-reader.state.v1';
 const STATE_SAVE_DELAY_MS = 800;
 const FOLDER_KEY = 'md-reader.folder.v1';
 const UI_KEY = 'md-reader.ui.v1';
+const TUTORIAL_KEY = 'md-reader.tutorial.v1';
 const RECENTRE_DELAY_MS = 2000;
 
 const $ = (selector) => document.querySelector(selector);
@@ -241,6 +243,8 @@ function renderLibrary() {
     return row;
   }));
   if (vault.sources.length === 0) sourceList.textContent = 'Nothing imported yet.';
+  $('#hide-tutorial').hidden = vault.tutorialHidden;
+  $('#show-tutorial').hidden = !vault.tutorialHidden;
 }
 
 async function reloadVault() {
@@ -281,6 +285,24 @@ async function removeSource(source) {
     setStatus(`Removed ${source.name} from MD Reader. The original file is unchanged.`);
   } catch (error) {
     setStatus(`Could not remove ${source.name}: ${error.message}`, true);
+  }
+}
+
+async function setTutorialHidden(hidden) {
+  vault.tutorialHidden = hidden;
+  await gm.storage.set(TUTORIAL_KEY, { hidden }).catch(() => undefined);
+  await reloadVault();
+  if (hidden) {
+    // Drop the tutorial from history, and close it if it is open.
+    controller.history = controller.history.filter((entry) => !entry.path.startsWith(`${TUTORIAL_FOLDER}/`));
+    if (controller.current?.path.startsWith(`${TUTORIAL_FOLDER}/`)) {
+      controller.current = null;
+      controller.page = null;
+      renderReader();
+    }
+    setStatus('Tutorial hidden. Bring it back from Imported files.');
+  } else {
+    await openNote(TUTORIAL_START);
   }
 }
 
@@ -538,6 +560,7 @@ async function initialize() {
   await controller.applySettings(settings);
 
   currentFolder = (await gm.storage.get(FOLDER_KEY).catch(() => null))?.value ?? '';
+  vault.tutorialHidden = (await gm.storage.get(TUTORIAL_KEY).catch(() => null))?.value?.hidden === true;
   const ui = (await gm.storage.get(UI_KEY).catch(() => null))?.value;
   if (ui && typeof ui.previewOpen === 'boolean') previewPanel.open = ui.previewOpen;
   try {
@@ -553,6 +576,10 @@ async function initialize() {
   } catch (error) {
     setStatus(`Could not reopen the last note: ${error.message}`, true);
   }
+  // First run: start with the tutorial on the glasses.
+  if (!controller.current && !saved?.path && !vault.tutorialHidden) {
+    await controller.open(TUTORIAL_START).catch(() => undefined);
+  }
   renderReader();
   if (!controller.current) {
     setStatus(vault.paths.length ? 'Pick a note to show it on the glasses.'
@@ -561,6 +588,8 @@ async function initialize() {
 }
 
 importMd.addEventListener('click', () => void importNotes('md'));
+$('#hide-tutorial').addEventListener('click', () => void setTutorialHidden(true));
+$('#show-tutorial').addEventListener('click', () => void setTutorialHidden(false));
 importZip.addEventListener('click', () => void importNotes('zip'));
 search.addEventListener('input', () => renderLibrary());
 backButton.addEventListener('click', () => void controller.back());

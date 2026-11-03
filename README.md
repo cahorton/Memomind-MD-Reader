@@ -5,6 +5,15 @@ the glasses: head tilt pages through the note one screen at a time, and head
 turns pick links. Links between notes (`[[wikilinks]]` and `[text](note.md)`)
 can be followed and retraced.
 
+## Tutorial
+
+The phone plugin has a built-in **MD Reader Tutorial** folder of four linked
+notes (`phone/md-reader/tutorial.js`). It covers turning pages and the tilt
+guide, practice picking between links and going back, a long note for
+continuous scrolling, and display and brightness. It opens on the glasses on
+first start. **Hide tutorial** under the vault list removes it, and **Show
+the tutorial again** under Imported files brings it back.
+
 ## Controls
 
 | Input | Action |
