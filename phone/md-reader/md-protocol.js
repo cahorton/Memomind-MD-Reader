@@ -138,8 +138,9 @@ export function decodeEvent(bytes) {
     if (bytes.length !== 6) break;
     return { type: 'back', session };
   case 5:
-    if (bytes.length !== 6) break;
-    return { type: 'hello', session };
+    if (bytes.length !== 6 && bytes.length !== 7) break;
+    // Glasses builds from v7 on append their version.
+    return { type: 'hello', session, glassesVersion: bytes.length === 7 ? bytes[6] : null };
   case 6:
     if (bytes.length !== 7) break;
     return { type: 'autoscroll', session, on: bytes[6] !== 0 };

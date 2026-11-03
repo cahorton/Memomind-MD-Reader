@@ -372,10 +372,12 @@ static void clear_style_box(md_reader_t *self, gm_plugin_lvgl_obj_t *object)
 
 static void send_hello(md_reader_t *self)
 {
-    uint8_t data[6];
+    uint8_t data[7];
     data[0] = PROTOCOL_VERSION;
     data[1] = EVENT_HELLO;
     write_u32(data + 2, self->session);
+    /* Lets the phone show which glasses build is running. */
+    data[6] = (uint8_t)GLASSES_VERSION;
     (void)self->host->bt_send(MD_EVENT_CHANNEL, data, sizeof(data));
 }
 

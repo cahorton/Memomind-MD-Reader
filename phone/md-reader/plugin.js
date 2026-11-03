@@ -2,6 +2,7 @@ import { createGMPlugin } from './vendor/gm-plugin-web-sdk.esm.js';
 import { MD_CHANNEL, MD_EVENT_CHANNEL, decodeEvent } from './md-protocol.js';
 import { ReaderController, defaultSettings } from './reader-controller.js';
 import { Vault } from './vault.js';
+import { PHONE_VERSION } from './version.js';
 import { browseRoot, compareNames, dirname, listFolder, noteTitle } from './vault-links.js';
 
 const SETTINGS_KEY = 'md-reader.settings.v1';
@@ -30,6 +31,12 @@ const breadcrumbs = $('#breadcrumbs');
 const pageInfo = $('#page-info');
 const preview = $('#preview');
 const status = $('#status');
+const versions = $('#versions');
+let glassesVersion = null;
+
+function showVersions() {
+  versions.textContent = `v${PHONE_VERSION}${glassesVersion === null ? '' : ` · glasses v${glassesVersion}`}`;
+}
 const logLines = $('#log-lines');
 const MAX_LOG_LINES = 300;
 const logEntries = [];
@@ -423,7 +430,11 @@ function handleMessage(message) {
     log('phone', `unreadable glasses message (${message.data?.length ?? 0} bytes)`);
     return;
   }
-  if (event.type === 'hello') log('phone', 'glasses plugin started or reconnected');
+  if (event.type === 'hello') {
+    if (event.glassesVersion !== null) glassesVersion = event.glassesVersion;
+    showVersions();
+    log('phone', `glasses plugin started or reconnected${event.glassesVersion === null ? '' : ` (v${event.glassesVersion})`}`);
+  }
   // Keep glasses events in order; a window reply must not overtake an open.
   eventQueue = eventQueue
     .then(() => controller.handleEvent(event))
@@ -518,4 +529,5 @@ window.addEventListener('pagehide', () => {
   if (controller) void gm.storage.set(STATE_KEY, controller.snapshot()).catch(() => undefined);
 });
 
+showVersions();
 void initialize();

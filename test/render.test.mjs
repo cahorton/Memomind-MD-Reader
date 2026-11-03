@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { findHeadingOffset, renderMarkdown, utf8Length } from '../phone/md-reader/md-render.js';
@@ -150,4 +151,15 @@ test('zip notes keep their folders, under the zip name when they have no top fol
   assert.equal(zipPrefix(['ObsidianVault/a.md', 'ObsidianVault/s1/b.md'], 'Vault.zip'), '');
   assert.equal(zipPrefix(['a.md', 's1/b.md'], 'ObsidianVault.zip'), 'ObsidianVault/');
   assert.equal(zipPrefix(['s1/a.md', 's2/b.md'], 'My Vault.ZIP'), 'My Vault/');
+});
+
+test('the version shown on the phone matches the manifests', async () => {
+  const { PHONE_VERSION } = await import('../phone/md-reader/version.js');
+  const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
+  assert.equal(PHONE_VERSION, JSON.parse(read('../phone/md-reader/manifest.json')).version);
+  assert.equal(PHONE_VERSION, JSON.parse(read('../package.json')).version);
+  const glassesVersion = Number(/#define GLASSES_VERSION (\d+)U/u.exec(read('../glass/md_reader/md_reader.c'))[1]);
+  assert.equal(glassesVersion, JSON.parse(read('../glass/md_reader/manifest.json')).version);
+  assert.deepEqual(decodeEvent(Uint8Array.from([1, 5, 0, 0, 0, 3, glassesVersion])),
+    { type: 'hello', session: 3, glassesVersion });
 });
