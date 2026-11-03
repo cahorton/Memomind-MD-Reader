@@ -85,8 +85,8 @@ the dark text with no background on the glasses, so MD Reader draws the
 highlight itself.)
 
 **Nod to open the highlighted link** (default on): one nod, down and back up
-within 0.7 s, each swing at least as fast as **Turn needed for links**, opens
-it. While a link is highlighted, a page turn waits at least 0.7 s and never
+within 1 s, each swing at least as fast as **Turn needed for links**, opens
+it. While a link is highlighted, a page turn waits at least 1 s and never
 happens mid-nod, so a nod is not taken as a look down; a look down that you
 hold still turns the page as usual.
 The status line shows the link count or a notice, plus `page / total` (or

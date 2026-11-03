@@ -31,7 +31,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 9U
+#define GLASSES_VERSION 10U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -91,7 +91,9 @@
  * While a link is selected, a page turn waits at least NOD_GUARD_MS so a nod
  * is not mistaken for a look down. */
 #define OPEN_NOD_SWINGS 2U
-#define NOD_GUARD_MS 700U
+#define NOD_GUARD_MS 1000U
+/* The link-open nod may be slower: down and back up within this long. */
+#define OPEN_NOD_GAP_MS 1000U
 
 #define DEFAULT_PITCH_THRESHOLD 12U
 #define DEFAULT_REPEAT_MS 0U
@@ -1336,13 +1338,13 @@ static void update_yaw(md_reader_t *self, const gm_plugin_imu_sample_t *sample,
 static void set_screen(md_reader_t *self, bool on);
 
 /* Counts direction reversals of a gyro rate past `threshold`; true when a
- * new swing was counted. A pause longer than SWING_GAP_MS starts over. */
-static bool count_swing(int8_t *sign, uint8_t *swings, uint32_t *gap,
+ * new swing was counted. A pause longer than max_gap starts over. */
+static bool count_swing(int8_t *sign, uint8_t *swings, uint32_t *gap, uint32_t max_gap,
                         int32_t rate, int32_t threshold, uint32_t dt)
 {
     int8_t now;
     *gap += dt;
-    if (*swings != 0U && *gap > SWING_GAP_MS) {
+    if (*swings != 0U && *gap > max_gap) {
         *swings = 0U;
         *sign = 0;
     }
@@ -1373,7 +1375,7 @@ static void update_head_gestures(md_reader_t *self,
     bool sleep = (self->flags & FLAG_GESTURE_SLEEP) != 0U;
     char text[24];
     if (sleep && self->screen_off == 0U &&
-        count_swing(&self->shake_sign, &self->shake_swings, &self->shake_gap,
+        count_swing(&self->shake_sign, &self->shake_swings, &self->shake_gap, SWING_GAP_MS,
                     horizontal, threshold, dt)) {
         if (self->shake_swings >= SHAKE_SWINGS) {
             self->shake_swings = 0U;
@@ -1400,6 +1402,7 @@ static void update_head_gestures(md_reader_t *self,
         return;
     }
     if (!count_swing(&self->nod_sign, &self->nod_swings, &self->nod_gap,
+                     self->screen_off != 0U ? SWING_GAP_MS : OPEN_NOD_GAP_MS,
                      vertical, threshold, dt))
         return;
     diag(self, "nod swing %u (rate %ld)", (unsigned int)self->nod_swings, (long)vertical);

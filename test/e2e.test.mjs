@@ -752,8 +752,33 @@ test('one nod opens the highlighted link; a nod never turns the page', async () 
     view = await state();
     assert.equal(view.title, 'Short');
 
+    // A slower nod, up to 1 s from down to back up, still opens it...
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    await controller.open('Long.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    await run('IMU 0 0 0 -250');
+    await run('TICK 80');
+    await run('IMU 0 0 0 0');
+    await run('TICK 900');
+    await run('IMU 0 0 0 250');
+    await run('TICK 80');
+    assert.equal((await state()).title, 'Short');
+    // ...but not one that takes longer.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    await controller.open('Long.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    await run('IMU 0 0 0 -250');
+    await run('TICK 80');
+    await run('IMU 0 0 0 0');
+    await run('TICK 1200');
+    await run('IMU 0 0 0 250');
+    await run('TICK 80');
+    assert.equal((await state()).title, 'Long');
+
     // With a link highlighted, looking down and holding still pages, after
-    // the 0.7 s guard.
+    // the 1 s guard.
     await run('IMU 0 0 0 0');
     await run('TICK 1000');
     await controller.open('Long.md');
@@ -761,7 +786,9 @@ test('one nod opens the highlighted link; a nod never turns the page', async () 
     await run('IMU -20 0 0 -250');
     await run('TICK 80');
     await run('IMU -20 0 0 0');
-    await run('TICK 1000');
+    await run('TICK 700');
+    assert.equal((await state()).pageIndex, 0);
+    await run('TICK 800');
     view = await state();
     assert.equal(view.title, 'Long');
     assert.equal(view.pageIndex, 1);
