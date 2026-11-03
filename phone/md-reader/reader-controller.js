@@ -19,7 +19,7 @@ export const defaultSettings = Object.freeze({
   headEnabled: true,
   pitchThreshold: 12,
   dwellMs: 300,
-  repeatMs: 1500,
+  repeatMs: 0,
   turnThreshold: 120,
   invertPitch: false,
   invertYaw: false,

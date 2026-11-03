@@ -70,7 +70,9 @@ export function encodeSettings(settings) {
   if (settings.tiltGuide) flags |= settingFlags.tiltGuide;
   data[2] = settings.headEnabled ? 1 : 0;
   data[3] = Math.max(3, Math.min(45, Math.round(settings.pitchThreshold)));
-  view.setUint16(4, Math.max(400, Math.min(5000, Math.round(settings.repeatMs))));
+  // 0 turns repeat off: one page per tilt.
+  const repeatMs = Math.round(settings.repeatMs);
+  view.setUint16(4, repeatMs <= 0 ? 0 : Math.max(500, Math.min(5000, repeatMs)));
   view.setUint16(6, Math.max(0, Math.min(2000, Math.round(settings.dwellMs))));
   view.setUint16(8, Math.max(20, Math.min(2000, Math.round(settings.turnThreshold))));
   data[10] = flags;

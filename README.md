@@ -22,11 +22,23 @@ can be followed and retraced.
 
 Head tracking details (all adjustable in the phone plugin's **Head control** panel):
 
-- **Tilt to page** (default 12°): pitch, measured from the neutral pose
-  captured at start (and on each single click). There is 3° of hysteresis, so
-  a tilt hovering near the line does not flicker.
+- **Tilt to page** (default 12°): pitch, measured from your neutral pose.
+  There is 3° of hysteresis, so a tilt hovering near the line does not flicker.
 - **Hold before paging** (default 0.3 s): a quick glance up does not turn the page.
-- **Repeat while held** (default 1.5 s).
+- **Repeat while held** (default **Off**): with repeat off, each tilt turns
+  exactly one page; look back, then tilt again for the next. Turn it on to keep
+  paging while you hold the tilt.
+- **Neutral follows you.** It is first taken when head control starts (and on
+  each single click), but it does not stay fixed:
+  - when you come back from a page turn, wherever your head settles becomes
+    the new neutral, so the return swing never pages the other way;
+  - outside a tilt, neutral slowly follows posture changes (over ~5 s);
+  - a tilt held for 2.5 s past its page turn (10 s with repeat on) is taken as
+    your new reading pose. This fixes a start taken while looking down at the
+    phone: you get at most one stray page, not endless paging. If you go back
+    to the old pose within a few seconds, it is restored without paging.
+- When a phone slider change reaches the glasses, they show
+  **Head settings updated**.
 - **Turn needed for links** (default 120, raw gyro units): a flick must exceed
   this for two samples in a row. The return swing is ignored until the head
   settles, so a left-and-back turn moves one link, not two.

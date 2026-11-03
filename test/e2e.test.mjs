@@ -71,7 +71,7 @@ class Sim {
   }
 }
 
-async function harness() {
+async function harness({ startPitch = 0 } = {}) {
   const sim = new Sim();
   const outbox = [];
   const vault = { paths: Object.keys(notes), readNote: async (path) => notes[path] };
@@ -100,8 +100,8 @@ async function harness() {
     return JSON.parse((await sim.command('DUMP')).find((line) => line.startsWith('{')));
   };
   await feed(await sim.next());
-  // Calibrate head tracking at a neutral pitch.
-  await run('IMU 0 0 0 0');
+  // Head tracking calibrates on the pose held at start.
+  await run(`IMU ${startPitch} 0 0 0`);
   await run('TICK 400');
   return { sim, controller, run, state, rejected };
 }
@@ -120,7 +120,7 @@ function phonePage(controller) {
 test.before(() => {
   mkdirSync(join(root, '.build'), { recursive: true });
   execFileSync('cc', [
-    '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-g',
+    '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-g', '-D_FORTIFY_SOURCE=0',
     '-fsanitize=address,undefined', '-I', sdkInclude,
     '-o', simPath, join(root, 'test', 'host_sim.c'),
   ], { stdio: 'inherit' });
@@ -211,7 +211,9 @@ test('head tilt pages through a long note one window at a time', async () => {
     await run('TICK 200');
     assert.equal((await state()).pageIndex, 0);
 
-    // Holding the look-up pages once after the dwell, then every repeat.
+    // With repeat turned on, holding the look-up pages once after the dwell,
+    // then every repeat.
+    await controller.applySettings({ repeatMs: 1500 });
     await run('IMU 20 0 0 0');
     await run('TICK 400');
     assert.equal((await state()).pageIndex, 1);
@@ -221,7 +223,9 @@ test('head tilt pages through a long note one window at a time', async () => {
     assert.equal(view.page, phonePage(controller));
     assert.equal(view.tiltZone, 1);
 
-    // Looking down pages back.
+    // Back to centre, then looking down pages back.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
     await run('IMU -20 0 0 0');
     await run('TICK 400');
     view = await state();
@@ -333,6 +337,75 @@ test('single click pauses head control; long press with no history exits', async
     await run(`BTN ${BUTTON.primary} ${ACTION.long}`);
     await run('TICK 3100');
     assert.equal((await state()).exited, 1);
+  } finally {
+    sim.close();
+  }
+});
+
+test('calibrating while looking down at the phone settles instead of paging forever', async () => {
+  const { sim, controller, run, state } = await harness({ startPitch: -35 });
+  try {
+    await controller.open('Long.md');
+    // Looking straight ahead to read is 35 degrees "up" from that neutral.
+    await run('IMU 0 0 0 0');
+    await run('TICK 15000');
+    let view = await state();
+    assert.ok(view.pageIndex <= 1, `paged ${view.pageIndex} times while reading straight ahead`);
+    assert.equal(view.tiltZone, 0);
+    const settled = view.pageIndex;
+
+    // Straight ahead is now neutral: a real look up pages once.
+    await run('IMU 20 0 0 0');
+    await run('TICK 600');
+    assert.equal((await state()).pageIndex, settled + 1);
+    await run('IMU 0 0 0 0');
+    await run('TICK 2000');
+    assert.equal((await state()).pageIndex, settled + 1);
+  } finally {
+    sim.close();
+  }
+});
+
+test('by default a held tilt turns one page, and coming back does not page back', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    await run('IMU 20 0 0 0');
+    await run('TICK 5000');
+    assert.equal((await state()).pageIndex, 1);
+    await run('IMU 0 0 0 0');
+    await run('TICK 2000');
+    assert.equal((await state()).pageIndex, 1);
+    // Next look up turns the next page.
+    await run('IMU 20 0 0 0');
+    await run('TICK 600');
+    await run('IMU 0 0 0 0');
+    await run('TICK 1500');
+    assert.equal((await state()).pageIndex, 2);
+    // And looking down goes back one.
+    await run('IMU -20 0 0 0');
+    await run('TICK 600');
+    await run('IMU 0 0 0 0');
+    await run('TICK 1500');
+    assert.equal((await state()).pageIndex, 1);
+  } finally {
+    sim.close();
+  }
+});
+
+test('phone settings reach the glasses and say so', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    assert.equal((await state()).pageIndex, 0);
+    await controller.applySettings({ pitchThreshold: 25 });
+    let view = await state();
+    assert.equal(view.hint, 'Head settings updated');
+    // 20 degrees is now below the threshold.
+    await run('IMU 20 0 0 0');
+    await run('TICK 3000');
+    view = await state();
+    assert.equal(view.pageIndex, 0);
   } finally {
     sim.close();
   }

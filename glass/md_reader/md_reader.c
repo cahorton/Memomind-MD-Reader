@@ -63,12 +63,20 @@
 #define FLAG_TILT_GUIDE 0x04U
 
 #define DEFAULT_PITCH_THRESHOLD 12U
-#define DEFAULT_REPEAT_MS 1500U
+#define DEFAULT_REPEAT_MS 0U
+#define MIN_REPEAT_MS 500U
 #define DEFAULT_DWELL_MS 300U
 #define DEFAULT_TURN_THRESHOLD 120U
 #define PITCH_HYSTERESIS 3
 #define IMU_SAMPLE_MS 40U
 #define CALIBRATION_SAMPLES 8U
+#define PITCH_SCALE 256
+#define DRIFT_TAU_MS 5000U
+#define SETTLE_MS 600U
+#define SETTLE_TAU_MS 150U
+#define HOLD_RECENTRE_MS 2500U
+#define REPEAT_HOLD_RECENTRE_MS 10000U
+#define RETURN_WINDOW_MS 6000U
 #define YAW_CONFIRM_SAMPLES 2U
 #define YAW_MIN_LOCK_MS 350U
 #define YAW_QUIET_MS 200U
@@ -167,6 +175,8 @@ typedef struct {
     uint16_t turn_threshold;
     uint8_t flags;
     uint8_t font_mode;
+    uint8_t settings_received;
+    uint8_t last_settings[SETTINGS_BYTES];
 
     /* Head tracking. */
     uint8_t imu_available;
@@ -174,7 +184,14 @@ typedef struct {
     uint32_t imu_elapsed;
     uint8_t calibration_count;
     int32_t calibration_sum;
-    int16_t neutral_pitch;
+    /* Neutral pose in 1/PITCH_SCALE degrees; it follows the head (see
+     * update_pitch) so a calibration taken while looking at the phone heals. */
+    int32_t neutral_fp;
+    int32_t previous_neutral_fp;
+    int8_t recentred_zone;
+    uint32_t return_window;
+    uint8_t settling;
+    uint32_t settle_elapsed;
     int8_t tilt_zone;
     uint8_t tilt_fired;
     uint32_t zone_elapsed;
@@ -881,6 +898,10 @@ static void reset_head_state(md_reader_t *self)
     self->tilt_fired = 0U;
     self->zone_elapsed = 0U;
     self->repeat_elapsed = 0U;
+    self->settling = 0U;
+    self->settle_elapsed = 0U;
+    self->return_window = 0U;
+    self->recentred_zone = 0;
     self->yaw_locked = 0U;
     self->yaw_hits = 0U;
     self->yaw_candidate = 0;
@@ -935,40 +956,103 @@ static void update_guide(md_reader_t *self, int16_t delta)
     }
 }
 
-static void update_pitch(md_reader_t *self, int16_t delta, uint32_t dt)
+/* Moves the neutral pose toward the current pitch with time constant tau. */
+static void track_neutral(md_reader_t *self, int16_t pitch, uint32_t dt,
+                          uint32_t tau)
+{
+    int32_t error = (int32_t)pitch * PITCH_SCALE - self->neutral_fp;
+    if (dt >= tau) self->neutral_fp += error;
+    else self->neutral_fp += error * (int32_t)dt / (int32_t)tau;
+}
+
+static void leave_zone(md_reader_t *self, bool settle)
+{
+    self->tilt_zone = 0;
+    self->tilt_fired = 0U;
+    self->zone_elapsed = 0U;
+    self->repeat_elapsed = 0U;
+    self->settling = settle ? 1U : 0U;
+    self->settle_elapsed = 0U;
+}
+
+static void turn_page(md_reader_t *self, int8_t zone)
+{
+    /* Looking up reads further down the note; looking down goes back. */
+    if (zone > 0) next_page(self);
+    else previous_page(self);
+}
+
+/*
+ * Pitch paging. A tilt past the threshold, held for the dwell, turns one page
+ * (more only if repeat is on). The neutral pose is not fixed:
+ *  - coming back from a page turn, wherever the head settles is the new
+ *    neutral, so the return swing never pages the other way;
+ *  - outside a tilt, neutral slowly follows posture changes;
+ *  - a tilt held well past its page turn is taken as the new reading pose
+ *    (this heals a calibration taken while looking down at the phone), and
+ *    a quick return to the old pose soon after restores it without paging.
+ */
+static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
 {
     int16_t enter = (int16_t)self->pitch_threshold;
     int16_t leave = (int16_t)(enter - PITCH_HYSTERESIS);
-    int8_t zone = self->tilt_zone;
+    int16_t delta;
+    uint32_t hold_limit;
     if (leave < 1) leave = 1;
-    if (zone == 0) {
-        if (delta >= enter) zone = 1;
-        else if (delta <= -enter) zone = -1;
-    } else if (zone > 0 && delta < leave) {
-        zone = delta <= -enter ? -1 : 0;
-    } else if (zone < 0 && delta > -leave) {
-        zone = delta >= enter ? 1 : 0;
+    if (self->settling != 0U) {
+        track_neutral(self, pitch, dt, SETTLE_TAU_MS);
+        self->settle_elapsed += dt;
+        if (self->settle_elapsed >= SETTLE_MS) self->settling = 0U;
+        return;
     }
-    if (zone != self->tilt_zone) {
+    self->return_window = self->return_window > dt ? self->return_window - dt : 0U;
+    if (self->tilt_zone == 0) track_neutral(self, pitch, dt, DRIFT_TAU_MS);
+    delta = (int16_t)(((int32_t)pitch * PITCH_SCALE - self->neutral_fp) /
+                      PITCH_SCALE);
+    if (self->tilt_zone == 0) {
+        int8_t zone = delta >= enter ? 1 : (delta <= -enter ? -1 : 0);
+        int32_t from_previous =
+            (int32_t)pitch * PITCH_SCALE - self->previous_neutral_fp;
+        if (zone == 0) return;
+        if (self->return_window != 0U && zone == -self->recentred_zone &&
+            from_previous < enter * PITCH_SCALE &&
+            from_previous > -enter * PITCH_SCALE) {
+            self->neutral_fp = self->previous_neutral_fp;
+            self->return_window = 0U;
+            leave_zone(self, true);
+            return;
+        }
         self->tilt_zone = zone;
         self->tilt_fired = 0U;
         self->zone_elapsed = 0U;
         self->repeat_elapsed = 0U;
+    } else if ((self->tilt_zone > 0 && delta < leave) ||
+               (self->tilt_zone < 0 && delta > -leave)) {
+        /* A glance that never turned a page needs no recentring. */
+        leave_zone(self, self->tilt_fired != 0U);
+        return;
     }
-    if (zone == 0) return;
+    self->zone_elapsed += dt;
     if (self->tilt_fired == 0U) {
-        self->zone_elapsed += dt;
         if (self->zone_elapsed < self->dwell_ms) return;
         self->tilt_fired = 1U;
         self->repeat_elapsed = 0U;
-    } else {
-        self->repeat_elapsed += dt;
-        if (self->repeat_elapsed < self->repeat_ms) return;
-        self->repeat_elapsed = 0U;
+        turn_page(self, self->tilt_zone);
+        return;
     }
-    /* Looking up reads further down the note; looking down goes back. */
-    if (zone > 0) next_page(self);
-    else previous_page(self);
+    hold_limit = self->repeat_ms != 0U ? REPEAT_HOLD_RECENTRE_MS : HOLD_RECENTRE_MS;
+    if (self->zone_elapsed >= hold_limit) {
+        self->previous_neutral_fp = self->neutral_fp;
+        self->recentred_zone = self->tilt_zone;
+        self->return_window = RETURN_WINDOW_MS;
+        leave_zone(self, true);
+        return;
+    }
+    if (self->repeat_ms == 0U) return;
+    self->repeat_elapsed += dt;
+    if (self->repeat_elapsed < self->repeat_ms) return;
+    self->repeat_elapsed = 0U;
+    turn_page(self, self->tilt_zone);
 }
 
 static void update_yaw(md_reader_t *self, const gm_plugin_imu_sample_t *sample,
@@ -1028,17 +1112,20 @@ static void update_head(md_reader_t *self, uint32_t elapsed_ms)
     if (self->calibration_count < CALIBRATION_SAMPLES) {
         self->calibration_sum += pitch;
         if (++self->calibration_count == CALIBRATION_SAMPLES) {
-            self->neutral_pitch =
-                (int16_t)(self->calibration_sum / (int32_t)CALIBRATION_SAMPLES);
+            self->neutral_fp = self->calibration_sum * PITCH_SCALE /
+                (int32_t)CALIBRATION_SAMPLES;
+            self->previous_neutral_fp = self->neutral_fp;
             self->guide_zone = 2;
             update_guide_visibility(self);
         }
         return;
     }
-    delta = (int16_t)(pitch - self->neutral_pitch);
-    update_pitch(self, delta, dt);
+    update_pitch(self, pitch, dt);
+    delta = (int16_t)(((int32_t)pitch * PITCH_SCALE - self->neutral_fp) /
+                      PITCH_SCALE);
     if ((self->flags & FLAG_TILT_GUIDE) != 0U) update_guide(self, delta);
-    if (self->tilt_zone == 0) update_yaw(self, &sample, dt);
+    if (self->tilt_zone == 0 && self->settling == 0U)
+        update_yaw(self, &sample, dt);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1128,10 +1215,17 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
     uint8_t previous_head = self->head_enabled;
     uint8_t previous_flags = self->flags;
     if (length != SETTINGS_BYTES) return false;
+    /* Confirm on the glasses that a phone slider change arrived. */
+    if (self->settings_received != 0U && self->displayed != 0U &&
+        self->libc->memcmp(self->last_settings, data, SETTINGS_BYTES) != 0)
+        show_notice(self, "Head settings updated");
+    self->libc->memcpy(self->last_settings, data, SETTINGS_BYTES);
+    self->settings_received = 1U;
     self->head_enabled = data[2] != 0U ? 1U : 0U;
     self->pitch_threshold = data[3] < 3U ? 3U : (data[3] > 45U ? 45U : data[3]);
     self->repeat_ms = read_u16(data + 4);
-    if (self->repeat_ms < 400U) self->repeat_ms = 400U;
+    if (self->repeat_ms != 0U && self->repeat_ms < MIN_REPEAT_MS)
+        self->repeat_ms = MIN_REPEAT_MS;
     self->dwell_ms = read_u16(data + 6);
     if (self->dwell_ms > 2000U) self->dwell_ms = 2000U;
     self->turn_threshold = read_u16(data + 8);
@@ -1427,6 +1521,7 @@ static gm_plugin_result_t on_start(void *opaque)
     self->head_enabled = 1U;
     self->pitch_threshold = DEFAULT_PITCH_THRESHOLD;
     self->repeat_ms = DEFAULT_REPEAT_MS;
+    self->settings_received = 0U;
     self->dwell_ms = DEFAULT_DWELL_MS;
     self->turn_threshold = DEFAULT_TURN_THRESHOLD;
     self->flags = FLAG_TILT_GUIDE;

@@ -5,6 +5,8 @@ import { Vault } from './vault.js';
 import { dirname, noteTitle } from './vault-links.js';
 
 const SETTINGS_KEY = 'md-reader.settings.v1';
+// Version 2 turned repeat-while-held off by default; older saves drop it.
+const SETTINGS_VERSION = 2;
 const STATE_KEY = 'md-reader.state.v1';
 const STATE_SAVE_DELAY_MS = 800;
 
@@ -39,7 +41,7 @@ const settingInputs = {
 const settingOutputs = {
   pitchThreshold: [$('#pitch-threshold-value'), (value) => `${value}°`],
   dwellMs: [$('#dwell-value'), (value) => `${(value / 1000).toFixed(2)} s`],
-  repeatMs: [$('#repeat-value'), (value) => `${(value / 1000).toFixed(1)} s`],
+  repeatMs: [$('#repeat-value'), (value) => (value === 0 ? 'Off' : `${(value / 1000).toFixed(1)} s`)],
   turnThreshold: [$('#turn-value'), (value) => (value < 100 ? 'light' : value < 200 ? 'medium' : 'firm') + ` (${value})`],
 };
 
@@ -266,6 +268,7 @@ function readSettings() {
   for (const [name, input] of Object.entries(settingInputs)) {
     settings[name] = input.type === 'checkbox' ? input.checked : Number(input.value);
   }
+  settings.settingsVersion = SETTINGS_VERSION;
   return settings;
 }
 
@@ -330,8 +333,9 @@ async function initialize() {
   connected = info?.connected === true;
   setConnection(connected ? 'Glasses connected' : 'Bridge ready', connected);
 
-  const savedSettings = (await gm.storage.get(SETTINGS_KEY).catch(() => null))?.value;
-  const settings = { ...defaultSettings, ...(savedSettings ?? {}) };
+  const savedSettings = { ...((await gm.storage.get(SETTINGS_KEY).catch(() => null))?.value ?? {}) };
+  if (savedSettings.settingsVersion !== SETTINGS_VERSION) delete savedSettings.repeatMs;
+  const settings = { ...defaultSettings, ...savedSettings };
   showSettings(settings);
   await controller.applySettings(settings);
 
