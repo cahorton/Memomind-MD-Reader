@@ -710,7 +710,7 @@ test('the highlighted link gets a drawn box (or inverted text) around each of it
   }
 });
 
-test('two nods open the highlighted link; a nod never turns the page', async () => {
+test('one nod opens the highlighted link; a nod never turns the page', async () => {
   const { sim, controller, run, state } = await harness();
   try {
     await controller.open('Short.md');
@@ -724,16 +724,19 @@ test('two nods open the highlighted link; a nod never turns the page', async () 
     assert.equal((await state()).title, 'Short');
 
     await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
-    const hints = [];
-    for (let swing = 0; swing < 4; swing += 1) {
-      await run(`IMU 0 0 0 ${swing % 2 ? 250 : -250}`);
-      await run('TICK 120');
-      hints.push((await state()).hint);
-    }
-    assert.ok(hints.includes('Nod again to open'), hints.join(', '));
+    // Down is not enough on its own; down and back up opens it.
+    await run('IMU 0 0 0 -250');
+    await run('TICK 120');
+    assert.equal((await state()).title, 'Short');
+    await run('IMU 0 0 0 250');
+    await run('TICK 120');
     let view = await state();
     assert.equal(view.title, 'Other');
     assert.equal(controller.history.length, 1);
+
+    // A slow look down that is held turns the page instead of opening.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
 
     // A slow nod with a real pitch dip, while a link is highlighted on a long
     // page: no page turn, and the link still opens.
@@ -742,14 +745,26 @@ test('two nods open the highlighted link; a nod never turns the page', async () 
     await controller.open('Long.md');
     await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
     assert.equal((await state()).selectedText, 'Short');
-    for (let nod = 0; nod < 2; nod += 1) {
-      await run('IMU -20 0 0 -250');
-      await run('TICK 400');
-      await run('IMU 0 0 0 250');
-      await run('TICK 200');
-    }
+    await run('IMU -20 0 0 -250');
+    await run('TICK 400');
+    await run('IMU 0 0 0 250');
+    await run('TICK 200');
     view = await state();
     assert.equal(view.title, 'Short');
+
+    // With a link highlighted, looking down and holding still pages, after
+    // the 0.7 s guard.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    await controller.open('Long.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    await run('IMU -20 0 0 -250');
+    await run('TICK 80');
+    await run('IMU -20 0 0 0');
+    await run('TICK 1000');
+    view = await state();
+    assert.equal(view.title, 'Long');
+    assert.equal(view.pageIndex, 1);
 
     // Turned off in settings, nods are ignored.
     await run('IMU 0 0 0 0');
@@ -760,7 +775,7 @@ test('two nods open the highlighted link; a nod never turns the page', async () 
       await run(`IMU 0 0 0 ${swing % 2 ? 250 : -250}`);
       await run('TICK 120');
     }
-    assert.equal((await state()).title, 'Short');
+    assert.equal((await state()).title, 'Long');
   } finally {
     sim.close();
   }

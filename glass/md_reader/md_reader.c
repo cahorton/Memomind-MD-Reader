@@ -30,7 +30,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 7U
+#define GLASSES_VERSION 8U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -86,10 +86,10 @@
 #define SHAKE_SWINGS 5U
 #define NOD_SWINGS 5U
 #define SWING_GAP_MS 700U
-/* Two nods (down, up, down, up) open the selected link. While a link is
- * selected, a page turn waits at least NOD_GUARD_MS so a nod is not
- * mistaken for a look down. */
-#define OPEN_NOD_SWINGS 4U
+/* One nod (down and back up, or up and back down) opens the selected link.
+ * While a link is selected, a page turn waits at least NOD_GUARD_MS so a nod
+ * is not mistaken for a look down. */
+#define OPEN_NOD_SWINGS 2U
 #define NOD_GUARD_MS 700U
 
 #define DEFAULT_PITCH_THRESHOLD 12U
@@ -1263,7 +1263,7 @@ static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
          * and never turn the page in the middle of nodding. */
         if (nod_opens_link(self)) {
             if (dwell < NOD_GUARD_MS) dwell = NOD_GUARD_MS;
-            if (self->nod_swings >= 2U) return;
+            if (self->nod_swings != 0U) return;
         }
         if (self->zone_elapsed < dwell) return;
         self->tilt_fired = 1U;
@@ -1357,8 +1357,8 @@ static bool nod_opens_link(const md_reader_t *self)
         self->screen_off == 0U && self->selected >= 0;
 }
 
-/* Gyro gestures: shake to turn the display off, nod to turn it on, and two
- * nods to open the selected link. */
+/* Gyro gestures: shake to turn the display off, nod to turn it on, and a
+ * nod to open the selected link. */
 static void update_head_gestures(md_reader_t *self,
                                  const gm_plugin_imu_sample_t *sample,
                                  uint32_t dt)
@@ -1407,11 +1407,10 @@ static void update_head_gestures(md_reader_t *self,
         set_screen(self, true);
         return;
     }
-    if (self->nod_swings == 2U) show_notice(self, "Nod again to open");
     if (self->nod_swings < OPEN_NOD_SWINGS) return;
     self->nod_swings = 0U;
     self->nod_sign = 0;
-    diag(self, "double nod: open link");
+    diag(self, "nod: open link");
     follow_selected(self);
 }
 
