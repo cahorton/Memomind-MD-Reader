@@ -5,6 +5,7 @@
 import { findHeadingOffset, renderMarkdown } from './md-render.js';
 import {
   NO_LINK,
+  encodeAutoScroll,
   encodeNotice,
   encodeOpen,
   encodeSettings,
@@ -22,6 +23,9 @@ export const defaultSettings = Object.freeze({
   // Off: one page per look. On: keep paging every pauseMs while held.
   continuous: false,
   pauseMs: 4000,
+  // Hold the glasses' brightness (stop automatic dimming); 0 keeps the level.
+  lockBrightness: true,
+  brightnessLevel: 0,
   turnThreshold: 120,
   invertPitch: false,
   invertYaw: false,
@@ -41,6 +45,7 @@ export class ReaderController {
     this.onChange = onChange;
     this.settings = { ...defaultSettings };
     this.history = [];
+    this.autoScroll = false;
     this.current = null;
     this.page = null;
     this.session = randomU32();
@@ -72,6 +77,8 @@ export class ReaderController {
       });
       if (this.history.length > MAX_HISTORY) this.history.shift();
     }
+    // The glasses stop auto-scroll when a different note opens.
+    if (this.current?.path !== doc.path) this.autoScroll = false;
     this.current = doc;
     this.page = { pageStart: Math.min(offset, doc.bytes.length), pageEnd: 0, pageIndex: 0, pageCount: 0, linkId };
     this.session = (this.session + 1) >>> 0 || 1;
@@ -96,6 +103,15 @@ export class ReaderController {
   async applySettings(settings) {
     this.settings = { ...this.settings, ...settings };
     await this.send(encodeSettings(this.settings));
+    // A running auto-scroll picks up a new pause.
+    if (this.autoScroll) await this.setAutoScroll(true);
+  }
+
+  async setAutoScroll(on) {
+    if (!this.current) return;
+    this.autoScroll = on;
+    await this.send(encodeAutoScroll({ session: this.session, on, intervalMs: this.settings.pauseMs }));
+    this.onChange('autoscroll');
   }
 
   resolve(link) {
@@ -154,6 +170,11 @@ export class ReaderController {
       break;
     case 'back':
       await this.back();
+      break;
+    case 'autoscroll':
+      // The glasses report when they stop it (end of note, a tap).
+      this.autoScroll = event.on;
+      this.onChange('autoscroll');
       break;
     default:
       break;

@@ -20,17 +20,22 @@
 #define COMMAND_SETTINGS 3U
 #define COMMAND_CLOSE 4U
 #define COMMAND_NOTICE 5U
+#define COMMAND_AUTOSCROLL 6U
 
 #define EVENT_NEED_WINDOW 1U
 #define EVENT_PAGE 2U
 #define EVENT_FOLLOW 3U
 #define EVENT_BACK 4U
 #define EVENT_HELLO 5U
+#define EVENT_AUTOSCROLL 6U
 
 #define OPEN_HEADER_BYTES 21U
 #define WINDOW_HEADER_BYTES 13U
 #define WINDOW_LINK_BYTES 10U
-#define SETTINGS_BYTES 12U
+#define SETTINGS_BYTES 14U
+#define SETTINGS_V1_BYTES 12U
+#define AUTOSCROLL_BYTES 9U
+#define MIN_AUTOSCROLL_MS 500U
 
 #define WINDOW_BYTES 8192U
 #define WINDOW_GUARD_BYTES 512U
@@ -184,6 +189,17 @@ typedef struct {
     uint8_t font_mode;
     uint8_t settings_received;
     uint8_t last_settings[SETTINGS_BYTES];
+    uint8_t brightness_lock;
+    uint8_t brightness_level;
+
+    /* Display control: holding brightness blocks automatic changes. */
+    uint8_t display_control_available;
+    uint8_t brightness_blocked;
+
+    /* Auto-scroll: a page every auto_interval_ms, ignoring head tilt. */
+    uint8_t auto_scroll;
+    uint32_t auto_interval_ms;
+    uint32_t auto_elapsed;
 
     /* Head tracking. */
     uint8_t imu_available;
@@ -316,6 +332,17 @@ static void send_hello(md_reader_t *self)
     (void)self->host->bt_send(MD_EVENT_CHANNEL, data, sizeof(data));
 }
 
+static void send_autoscroll_state(md_reader_t *self)
+{
+    uint8_t data[7];
+    if (self->session == 0U) return;
+    data[0] = PROTOCOL_VERSION;
+    data[1] = EVENT_AUTOSCROLL;
+    write_u32(data + 2, self->session);
+    data[6] = self->auto_scroll;
+    (void)self->host->bt_send(MD_EVENT_CHANNEL, data, sizeof(data));
+}
+
 static void request_window(md_reader_t *self, uint32_t offset)
 {
     uint8_t data[12];
@@ -401,6 +428,8 @@ static void update_hint(md_reader_t *self)
     if (self->hint_label == 0 || self->notice_elapsed != 0U) return;
     if (self->displayed == 0U) {
         self->ui->label_set_text(self->hint_label, "");
+    } else if (self->auto_scroll != 0U) {
+        self->ui->label_set_text(self->hint_label, "Auto-scroll  (tap to stop)");
     } else if (self->head_enabled == 0U && self->imu_available != 0U) {
         self->ui->label_set_text(self->hint_label, "Head scroll paused");
     } else if (self->page_link_count == 0U) {
@@ -578,6 +607,7 @@ static void wipe_private_data(md_reader_t *self)
     self->doc_id = 0U;
     self->total_bytes = 0U;
     self->history_depth = 0U;
+    self->auto_scroll = 0U;
 }
 
 static void record_next_start(md_reader_t *self, uint16_t index, uint32_t end)
@@ -790,6 +820,7 @@ static void render_page(md_reader_t *self, uint16_t index, uint16_t select_id)
     /* Only a page turn gets an arrow; opening or jumping clears it. */
     show_arrow(self, self->arrow_pending);
     self->arrow_pending = 0;
+    self->auto_elapsed = 0U;
     update_footer(self);
     update_hint(self);
     send_page(self);
@@ -970,6 +1001,7 @@ static void reset_head_state(md_reader_t *self)
 static void update_guide_visibility(md_reader_t *self)
 {
     bool hidden = self->head_enabled == 0U || self->imu_running == 0U ||
+        self->auto_scroll != 0U ||
         (self->flags & FLAG_TILT_GUIDE) == 0U ||
         self->calibration_count < CALIBRATION_SAMPLES;
     set_hidden(self, self->guide_track, hidden);
@@ -1188,7 +1220,8 @@ static void update_head(md_reader_t *self, uint32_t elapsed_ms)
         }
         return;
     }
-    update_pitch(self, pitch, dt);
+    /* Auto-scroll pages on a timer "regardless of where I'm looking". */
+    if (self->auto_scroll == 0U) update_pitch(self, pitch, dt);
     delta = (int16_t)(((int32_t)pitch * PITCH_SCALE - self->neutral_fp) /
                       PITCH_SCALE);
     if ((self->flags & FLAG_TILT_GUIDE) != 0U) update_guide(self, delta);
@@ -1199,6 +1232,76 @@ static void update_head(md_reader_t *self, uint32_t elapsed_ms)
 /* ------------------------------------------------------------------ */
 /* Message handlers                                                    */
 /* ------------------------------------------------------------------ */
+
+static void apply_brightness(md_reader_t *self)
+{
+    const gm_plugin_display_control_api_t *display = &self->host->display_control;
+    if (self->display_control_available == 0U) return;
+    if (self->brightness_lock != 0U) {
+        if (self->brightness_blocked == 0U &&
+            display->auto_brightness_block(true) == GM_PLUGIN_OK)
+            self->brightness_blocked = 1U;
+        /* Level 0 keeps whatever brightness the glasses have now. */
+        if (self->brightness_blocked != 0U && self->brightness_level >= 1U &&
+            self->brightness_level <= 10U)
+            (void)display->brightness_set(
+                (gm_plugin_display_brightness_t)self->brightness_level);
+    } else if (self->brightness_blocked != 0U &&
+               display->auto_brightness_block(false) == GM_PLUGIN_OK) {
+        self->brightness_blocked = 0U;
+    }
+}
+
+static void release_brightness(md_reader_t *self)
+{
+    if (self->display_control_available != 0U && self->brightness_blocked != 0U &&
+        self->host->display_control.auto_brightness_block(false) == GM_PLUGIN_OK)
+        self->brightness_blocked = 0U;
+}
+
+static void set_autoscroll(md_reader_t *self, bool on, const char *notice)
+{
+    self->auto_scroll = on ? 1U : 0U;
+    self->auto_elapsed = 0U;
+    if (on) leave_zone(self, false);
+    update_guide_visibility(self);
+    if (notice != 0) show_notice(self, notice);
+    update_hint(self);
+    send_autoscroll_state(self);
+}
+
+static void update_autoscroll(md_reader_t *self, uint32_t elapsed_ms)
+{
+    if (self->auto_scroll == 0U || self->displayed == 0U ||
+        self->pending != PENDING_NONE)
+        return;
+    self->auto_elapsed += elapsed_ms;
+    if (self->auto_elapsed < self->auto_interval_ms) return;
+    self->auto_elapsed = 0U;
+    if (self->current_page + 1U >= self->page_count) {
+        set_autoscroll(self, false, "End of note");
+        return;
+    }
+    next_page(self);
+}
+
+static bool handle_autoscroll(md_reader_t *self, const uint8_t *data,
+                              uint32_t length)
+{
+    if (length != AUTOSCROLL_BYTES || read_u32(data + 2) != self->session)
+        return false;
+    self->auto_interval_ms = read_u16(data + 7);
+    if (self->auto_interval_ms < MIN_AUTOSCROLL_MS)
+        self->auto_interval_ms = MIN_AUTOSCROLL_MS;
+    if ((data[6] != 0U) == (self->auto_scroll != 0U)) {
+        /* Same state: only the interval changed. */
+        send_autoscroll_state(self);
+        return true;
+    }
+    set_autoscroll(self, data[6] != 0U,
+                   data[6] != 0U ? "Auto-scroll on" : "Auto-scroll off");
+    return true;
+}
 
 static bool handle_open(md_reader_t *self, const uint8_t *data, uint32_t length)
 {
@@ -1227,6 +1330,7 @@ static bool handle_open(md_reader_t *self, const uint8_t *data, uint32_t length)
     self->libc->memcpy(self->title, data + OPEN_HEADER_BYTES, title_length);
     self->title[title_length] = '\0';
     self->ui->label_set_text(self->title_label, self->title);
+    if (!same_doc && self->auto_scroll != 0U) set_autoscroll(self, false, 0);
     /* "Opening..." or "Back" has done its job once the note arrives. */
     self->notice_elapsed = 0U;
     set_exit(self, false);
@@ -1282,13 +1386,18 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
     uint8_t previous_font = self->font_mode;
     uint8_t previous_head = self->head_enabled;
     uint8_t previous_flags = self->flags;
-    if (length != SETTINGS_BYTES) return false;
+    uint8_t received[SETTINGS_BYTES] = {0};
+    if (length != SETTINGS_BYTES && length != SETTINGS_V1_BYTES) return false;
+    self->libc->memcpy(received, data, length);
     /* Confirm on the glasses that a phone slider change arrived. */
     if (self->settings_received != 0U && self->displayed != 0U &&
-        self->libc->memcmp(self->last_settings, data, SETTINGS_BYTES) != 0)
-        show_notice(self, "Head settings updated");
-    self->libc->memcpy(self->last_settings, data, SETTINGS_BYTES);
+        self->libc->memcmp(self->last_settings, received, SETTINGS_BYTES) != 0)
+        show_notice(self, "Settings updated");
+    self->libc->memcpy(self->last_settings, received, SETTINGS_BYTES);
     self->settings_received = 1U;
+    self->brightness_lock = received[12] != 0U ? 1U : 0U;
+    self->brightness_level = received[13] > 10U ? 10U : received[13];
+    apply_brightness(self);
     self->head_enabled = data[2] != 0U ? 1U : 0U;
     self->pitch_threshold = data[3] < 3U ? 3U : (data[3] > 45U ? 45U : data[3]);
     self->repeat_ms = read_u16(data + 4);
@@ -1338,6 +1447,7 @@ static bool receive_message(md_reader_t *self, const uint8_t *data,
     case COMMAND_WINDOW: return handle_window(self, data, length);
     case COMMAND_SETTINGS: return handle_settings(self, data, length);
     case COMMAND_NOTICE: return handle_notice(self, data, length);
+    case COMMAND_AUTOSCROLL: return handle_autoscroll(self, data, length);
     case COMMAND_CLOSE:
         if (length != 6U || read_u32(data + 2) != self->session) return false;
         wipe_private_data(self);
@@ -1373,7 +1483,8 @@ static bool handle_button(md_reader_t *self, const gm_plugin_event_t *event)
     if (button == GM_PLUGIN_BUTTON_PRIMARY) {
         switch (action) {
         case GM_PLUGIN_BUTTON_ACTION_SINGLE:
-            if (self->exit_active == 0U) toggle_head(self);
+            if (self->auto_scroll != 0U) set_autoscroll(self, false, "Auto-scroll off");
+            else if (self->exit_active == 0U) toggle_head(self);
             break;
         case GM_PLUGIN_BUTTON_ACTION_DOUBLE:
             follow_selected(self);
@@ -1607,6 +1718,11 @@ static gm_plugin_result_t on_start(void *opaque)
     self->arrow_shown = 0;
     self->arrow_elapsed = 0U;
     self->confirm_on_calibration = 0U;
+    self->brightness_lock = 0U;
+    self->brightness_level = 0U;
+    self->brightness_blocked = 0U;
+    self->auto_scroll = 0U;
+    self->auto_interval_ms = 4000U;
     wipe_private_data(self);
     result = create_ui(self);
     if (result != GM_PLUGIN_OK) {
@@ -1663,6 +1779,7 @@ static void on_loop(void *opaque, uint32_t elapsed_ms)
     } else if (self->pending == PENDING_SEEK) {
         continue_seek(self);
     }
+    update_autoscroll(self, elapsed_ms);
     update_head(self, elapsed_ms);
 }
 
@@ -1670,12 +1787,14 @@ static void on_suspend(void *opaque)
 {
     md_reader_t *self = opaque;
     set_imu(self, false);
+    release_brightness(self);
 }
 
 static void on_resume(void *opaque)
 {
     md_reader_t *self = opaque;
     set_imu(self, self->head_enabled != 0U);
+    apply_brightness(self);
     send_hello(self);
 }
 
@@ -1683,6 +1802,7 @@ static void on_stop(void *opaque)
 {
     md_reader_t *self = opaque;
     set_imu(self, false);
+    release_brightness(self);
     wipe_private_data(self);
     if (self->root != 0) self->ui->obj_clean(self->root);
     self->root = 0;
@@ -1727,6 +1847,11 @@ gm_plugin_result_t gm_plugin_entry(const gm_plugin_host_api_t *host,
     reader.imu_available =
         (host->capabilities & GM_PLUGIN_CAP_IMU_RAW) != 0U &&
         host->imu_enable != 0 && host->imu_read != 0 ? 1U : 0U;
+    /* Brightness holding is optional too. */
+    reader.display_control_available =
+        (host->capabilities & GM_PLUGIN_CAP_DISPLAY_CONTROL) != 0U &&
+        host->display_control.auto_brightness_block != 0 &&
+        host->display_control.brightness_set != 0 ? 1U : 0U;
     plugin->abi_version = GM_PLUGIN_ABI_MIN_VERSION;
     plugin->context = &reader;
     plugin->on_start = on_start;

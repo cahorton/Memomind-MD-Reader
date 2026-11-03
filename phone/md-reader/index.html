@@ -50,6 +50,10 @@
             <span id="page-info" class="page-info"></span>
           </div>
           <article id="preview" class="preview" aria-label="Note text with the glasses page highlighted"></article>
+          <div class="reader-actions">
+            <button id="auto-scroll" class="primary" type="button">Start auto-scroll</button>
+            <span id="auto-scroll-info" class="hint"></span>
+          </div>
         </div>
 
         <details class="settings" open>
@@ -64,7 +68,7 @@
               <input id="dwell" type="range" min="0" max="1000" step="50">
             </label>
             <label class="toggle"><input id="continuous" type="checkbox"> Keep scrolling while I look up/down</label>
-            <label id="pause-setting">Pause between pages <output id="pause-value"></output>
+            <label id="pause-setting">Pause between pages (continuous and auto-scroll) <output id="pause-value"></output>
               <input id="pause" type="range" min="1000" max="10000" step="500">
             </label>
             <label>Turn needed for links <output id="turn-value"></output>
@@ -73,6 +77,10 @@
             <label class="toggle"><input id="invert-pitch" type="checkbox"> Swap up/down</label>
             <label class="toggle"><input id="invert-yaw" type="checkbox"> Swap left/right</label>
             <label class="toggle"><input id="large-font" type="checkbox"> Large glasses font</label>
+            <label class="toggle"><input id="lock-brightness" type="checkbox"> Hold glasses brightness (no auto-dimming)</label>
+            <label id="brightness-setting">Brightness <output id="brightness-value"></output>
+              <input id="brightness" type="range" min="0" max="10" step="1">
+            </label>
           </div>
         </details>
 

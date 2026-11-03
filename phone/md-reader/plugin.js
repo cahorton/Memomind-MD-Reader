@@ -21,6 +21,8 @@ const sourceList = $('#source-list');
 const emptyState = $('#empty-state');
 const readerView = $('#reader');
 const backButton = $('#back');
+const autoScrollButton = $('#auto-scroll');
+const autoScrollInfo = $('#auto-scroll-info');
 const noteHeading = $('#note-title');
 const breadcrumbs = $('#breadcrumbs');
 const pageInfo = $('#page-info');
@@ -38,11 +40,14 @@ const settingInputs = {
   invertPitch: $('#invert-pitch'),
   invertYaw: $('#invert-yaw'),
   largeFont: $('#large-font'),
+  lockBrightness: $('#lock-brightness'),
+  brightnessLevel: $('#brightness'),
 };
 const settingOutputs = {
   pitchThreshold: [$('#pitch-threshold-value'), (value) => `${value}°`],
   dwellMs: [$('#dwell-value'), (value) => `${(value / 1000).toFixed(2)} s`],
   pauseMs: [$('#pause-value'), (value) => `${(value / 1000).toFixed(1)} s`],
+  brightnessLevel: [$('#brightness-value'), (value) => (value === 0 ? 'keep current' : `${value} of 10`)],
   turnThreshold: [$('#turn-value'), (value) => (value < 100 ? 'light' : value < 200 ? 'medium' : 'firm') + ` (${value})`],
 };
 
@@ -132,7 +137,9 @@ async function importNotes(kind) {
 }
 
 async function removeSource(source) {
-  if (!confirm(`Remove ${source.name} from the phone?`)) return;
+  // Import copied the file into MD Reader's own storage; this deletes only
+  // that copy. The original in Files (or wherever it came from) stays.
+  if (!confirm(`Remove ${source.name} from MD Reader?\n\nYour original file is not touched.`)) return;
   try {
     await vault.removeSource(source.fileId);
     await reloadVault();
@@ -141,7 +148,7 @@ async function removeSource(source) {
       controller.page = null;
       renderReader();
     }
-    setStatus(`Removed ${source.name}.`);
+    setStatus(`Removed ${source.name} from MD Reader. The original file is unchanged.`);
   } catch (error) {
     setStatus(`Could not remove ${source.name}: ${error.message}`, true);
   }
@@ -229,6 +236,10 @@ function renderReader() {
   noteHeading.textContent = doc.title;
   backButton.disabled = controller.history.length === 0;
   breadcrumbs.textContent = controller.history.slice(-3).map((entry) => noteTitle(entry.path)).join(' › ');
+  autoScrollButton.textContent = controller.autoScroll ? 'Stop auto-scroll' : 'Start auto-scroll';
+  autoScrollInfo.textContent = controller.autoScroll
+    ? `A page every ${(controller.settings.pauseMs / 1000).toFixed(1)} s. Tap the glasses to stop.`
+    : `Pages every ${(controller.settings.pauseMs / 1000).toFixed(1)} s, wherever you look.`;
   pageInfo.textContent = !page?.pageEnd ? ''
     : page.pageCount ? `Page ${page.pageIndex + 1} of ${page.pageCount}`
       : `Page ${page.pageIndex + 1}`;
@@ -262,7 +273,7 @@ function showSettings(settings) {
   for (const [name, [output, format]] of Object.entries(settingOutputs)) {
     output.textContent = format(Number(settings[name]));
   }
-  $('#pause-setting').hidden = !settings.continuous;
+  $('#brightness-setting').hidden = !settings.lockBrightness;
 }
 
 function readSettings() {
@@ -279,6 +290,7 @@ async function saveSettings() {
   showSettings(settings);
   await controller.applySettings(settings);
   await gm.storage.set(SETTINGS_KEY, settings).catch(() => undefined);
+  if (controller.current) renderReader();
 }
 
 // ---------------------------------------------------------------- startup
@@ -365,6 +377,7 @@ importMd.addEventListener('click', () => void importNotes('md'));
 importZip.addEventListener('click', () => void importNotes('zip'));
 search.addEventListener('input', () => renderLibrary());
 backButton.addEventListener('click', () => void controller.back());
+autoScrollButton.addEventListener('click', () => void controller.setAutoScroll(!controller.autoScroll));
 bridgeState.addEventListener('click', () => {
   if (!controller) globalThis.location.reload();
 });

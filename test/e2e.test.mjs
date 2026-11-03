@@ -414,7 +414,7 @@ test('phone settings reach the glasses and say so', async () => {
     assert.equal((await state()).pageIndex, 0);
     await controller.applySettings({ pitchThreshold: 25 });
     let view = await state();
-    assert.equal(view.hint, 'Head settings updated');
+    assert.equal(view.hint, 'Settings updated');
     // 20 degrees is now below the threshold.
     await run('IMU -20 0 0 0');
     await run('TICK 3000');
@@ -447,6 +447,79 @@ test('continuous mode keeps scrolling while the look is held, up to a 10 s pause
     assert.equal((await state()).pageIndex, 3);
     await run('TICK 50000');
     assert.equal((await state()).pageIndex, 8);
+  } finally {
+    sim.close();
+  }
+});
+
+test('auto-scroll pages on a timer wherever you look, and stops on a tap or at the end', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    await controller.applySettings({ pauseMs: 2000 });
+    await controller.setAutoScroll(true);
+    let view = await state();
+    assert.equal(view.autoScroll, 1);
+    assert.equal(view.hint, 'Auto-scroll on');
+    assert.equal(view.guideHidden, 1);
+    await run('TICK 2100');
+    view = await state();
+    assert.equal(view.pageIndex, 1);
+    assert.equal(view.arrow, 1);
+    assert.equal(view.hint, 'Auto-scroll  (tap to stop)');
+
+    // Looking up or down does not change the pace.
+    await run('IMU 25 0 0 0');
+    await run('TICK 1000');
+    assert.equal((await state()).pageIndex, 1);
+    await run('IMU -25 0 0 0');
+    await run('TICK 1000');
+    assert.equal((await state()).pageIndex, 2);
+    await run('IMU 0 0 0 0');
+
+    // A new pause applies while it runs.
+    await controller.applySettings({ pauseMs: 5000 });
+    await run('TICK 4000');
+    assert.equal((await state()).pageIndex, 2);
+    await run('TICK 1200');
+    assert.equal((await state()).pageIndex, 3);
+
+    // A tap on the glasses stops it and the phone hears about it.
+    await run(`BTN ${BUTTON.primary} ${ACTION.single}`);
+    view = await state();
+    assert.equal(view.autoScroll, 0);
+    assert.equal(view.hint, 'Auto-scroll off');
+    assert.equal(view.headEnabled, 1);
+    assert.equal(controller.autoScroll, false);
+    await run('TICK 12000');
+    assert.equal((await state()).pageIndex, 3);
+
+    // At the end of a note it stops by itself.
+    await controller.open('Short.md');
+    await controller.setAutoScroll(true);
+    await run('TICK 5200');
+    view = await state();
+    assert.equal(view.autoScroll, 0);
+    assert.equal(view.hint, 'End of note');
+    assert.equal(controller.autoScroll, false);
+  } finally {
+    sim.close();
+  }
+});
+
+test('brightness can be held, at the current level or a fixed one', async () => {
+  const { sim, controller, state } = await harness();
+  try {
+    // The default holds the current level: auto-dimming blocked, level kept.
+    let view = await state();
+    assert.equal(view.brightnessBlocked, 1);
+    assert.equal(view.brightness, 5);
+    await controller.applySettings({ brightnessLevel: 8 });
+    view = await state();
+    assert.equal(view.brightnessBlocked, 1);
+    assert.equal(view.brightness, 8);
+    await controller.applySettings({ lockBrightness: false });
+    assert.equal((await state()).brightnessBlocked, 0);
   } finally {
     sim.close();
   }

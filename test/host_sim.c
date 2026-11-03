@@ -180,6 +180,11 @@ static gm_plugin_result_t host_imu_read(gm_plugin_imu_sample_t *sample)
     return GM_PLUGIN_OK;
 }
 static void host_exit(void) { exited = 1; }
+static int brightness_blocked;
+static int brightness_level = 5;
+static gm_plugin_result_t host_auto_brightness_block(bool blocked) { brightness_blocked = blocked; return GM_PLUGIN_OK; }
+static gm_plugin_result_t host_brightness_set(gm_plugin_display_brightness_t level) { brightness_level = (int)level; return GM_PLUGIN_OK; }
+static gm_plugin_display_brightness_t host_brightness_get(void) { return (gm_plugin_display_brightness_t)brightness_level; }
 static gm_plugin_result_t host_extension(gm_plugin_extension_id_t id, const void **api)
 {
     if (id != GM_PLUGIN_EXTENSION_LIBC) { *api = 0; return GM_PLUGIN_ENOTSUP; }
@@ -213,10 +218,16 @@ static void setup_host(void)
     host_api = (gm_plugin_host_api_t){
         .struct_size = sizeof(gm_plugin_host_api_t), .abi_version = GM_PLUGIN_ABI_VERSION,
         .capabilities = GM_PLUGIN_CAP_DISPLAY_BITMAP | GM_PLUGIN_CAP_BUTTON |
-            GM_PLUGIN_CAP_BLUETOOTH | GM_PLUGIN_CAP_IMU_RAW | GM_PLUGIN_CAP_IMU_EVENTS,
+            GM_PLUGIN_CAP_BLUETOOTH | GM_PLUGIN_CAP_IMU_RAW | GM_PLUGIN_CAP_IMU_EVENTS |
+            GM_PLUGIN_CAP_DISPLAY_CONTROL,
         .log = host_log, .monotonic_ms = host_monotonic, .alloc = host_alloc,
         .free = host_free, .display_get_info = host_display,
         .graphics = { .lvgl = &lvgl_api },
+        .display_control = {
+            .auto_brightness_block = host_auto_brightness_block,
+            .brightness_set = host_brightness_set,
+            .brightness_get = host_brightness_get,
+        },
         .bt_send = host_bt_send, .imu_enable = host_imu_enable, .imu_read = host_imu_read,
         .app_exit = host_exit, .extension_get = host_extension,
     };
@@ -256,6 +267,8 @@ static void dump(void)
            r->arrow_elapsed != 0U,
            r->scroll_arrow && r->scroll_arrow->point_count == 3 ? (int)r->scroll_arrow->points[1].y : -1,
            r->viewport_y, r->viewport_y + r->viewport_height);
+    printf(",\"autoScroll\":%u,\"brightnessBlocked\":%d,\"brightness\":%d",
+           r->auto_scroll, brightness_blocked, brightness_level);
     printf(",\"underlines\":[");
     for (unsigned i = 0; i < MAX_UNDERLINES; ++i) {
         gm_plugin_lvgl_obj_t *line = r->underline[i];

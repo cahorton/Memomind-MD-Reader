@@ -63,7 +63,7 @@ export function encodeWindow({ session, offset, final, links, bytes }) {
 }
 
 export function encodeSettings(settings) {
-  const { data, view } = header(12, 3);
+  const { data, view } = header(14, 3);
   let flags = 0;
   if (settings.invertPitch) flags |= settingFlags.invertPitch;
   if (settings.invertYaw) flags |= settingFlags.invertYaw;
@@ -77,6 +77,18 @@ export function encodeSettings(settings) {
   view.setUint16(8, Math.max(20, Math.min(2000, Math.round(settings.turnThreshold))));
   data[10] = flags;
   data[11] = settings.largeFont ? 1 : 0;
+  // Brightness: hold blocks automatic changes; level 0 keeps the current level.
+  data[12] = settings.lockBrightness ? 1 : 0;
+  data[13] = Math.max(0, Math.min(10, Math.round(settings.brightnessLevel ?? 0)));
+  return data;
+}
+
+// Auto-scroll: a page every intervalMs regardless of head position.
+export function encodeAutoScroll({ session, on, intervalMs }) {
+  const { data, view } = header(9, 6);
+  view.setUint32(2, session);
+  data[6] = on ? 1 : 0;
+  view.setUint16(7, Math.max(500, Math.min(10000, Math.round(intervalMs))));
   return data;
 }
 
@@ -120,6 +132,9 @@ export function decodeEvent(bytes) {
   case 5:
     if (bytes.length !== 6) break;
     return { type: 'hello', session };
+  case 6:
+    if (bytes.length !== 7) break;
+    return { type: 'autoscroll', session, on: bytes[6] !== 0 };
   default:
     break;
   }

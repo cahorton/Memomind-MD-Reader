@@ -15,7 +15,8 @@ can be followed and retraced.
 | Turn head **right** / **left** (a quick flick) | Highlight the next / previous link on the page |
 | **Double-click** | Open the highlighted link |
 | **Long press** | Back to the previous note (with nothing to go back to: 3 s exit countdown, release to cancel) |
-| **Single click** | Pause or resume head control; resuming recentres "neutral" on your current pose |
+| **Single click** | Stop auto-scroll if it is running; otherwise pause or resume head control (resuming recentres "neutral" on your current pose) |
+| **Start auto-scroll** (phone button) | A page every *pause*, wherever you look; stops at the end of the note, on a tap, or when another note opens |
 | Ring up/down, page up/down | Previous / next page |
 | Ring left/right | Previous / next link |
 | Ring back | Back (or exit) · Ring home: exit |
@@ -45,8 +46,12 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
     this only until neutral is confirmed: by a single click, by coming back
     from any page turn, or by such a re-centre. After that, a held look
     scrolls for as long as you hold it.
-- When a phone slider change reaches the glasses, they show
-  **Head settings updated**.
+- When a phone setting change reaches the glasses, they show
+  **Settings updated**.
+- **Hold glasses brightness** (default on): stops the glasses' automatic
+  brightness from dimming the display while MD Reader runs. **Brightness**
+  `keep current` holds whatever level the glasses had; 1–10 sets a fixed level.
+  The glasses release the hold when MD Reader stops.
 - **Turn needed for links** (default 120, raw gyro units): a flick must exceed
   this for two samples in a row. The return swing is ignored until the head
   settles, so a left-and-back turn moves one link, not two.
@@ -77,6 +82,9 @@ phone (Web plugin, JS)                          glasses (.gmp, C)
   - lists use `·`, tasks `[ ]`/`[x]`, quotes `|`, callouts `NOTE: …`
   - emphasis, HTML, front matter and `%% comments %%` are stripped
   - images become `[image: alt]`
+
+  Import copies each file into MD Reader's own storage. **Remove** in the
+  phone plugin deletes only that copy; the original file stays where it was.
 
   Links resolve like Obsidian: by note name (preferring the same folder), by
   relative or vault path, with `#heading` targets and `|aliases`. The phone
