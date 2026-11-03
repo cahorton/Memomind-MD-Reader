@@ -2,13 +2,14 @@ import { createGMPlugin } from './vendor/gm-plugin-web-sdk.esm.js';
 import { MD_CHANNEL, MD_EVENT_CHANNEL, decodeEvent } from './md-protocol.js';
 import { ReaderController, defaultSettings } from './reader-controller.js';
 import { Vault } from './vault.js';
-import { dirname, noteTitle } from './vault-links.js';
+import { browseRoot, compareNames, dirname, listFolder, noteTitle } from './vault-links.js';
 
 const SETTINGS_KEY = 'md-reader.settings.v1';
 // Version 3 replaced repeatMs with continuous + pauseMs.
 const SETTINGS_VERSION = 3;
 const STATE_KEY = 'md-reader.state.v1';
 const STATE_SAVE_DELAY_MS = 800;
+const FOLDER_KEY = 'md-reader.folder.v1';
 
 const $ = (selector) => document.querySelector(selector);
 const bridgeState = $('#bridge-state');
@@ -16,6 +17,7 @@ const importMd = $('#import-md');
 const importZip = $('#import-zip');
 const search = $('#search');
 const noteList = $('#note-list');
+const folderPath = $('#folder-path');
 const noteCount = $('#note-count');
 const sourceList = $('#source-list');
 const emptyState = $('#empty-state');
@@ -57,6 +59,8 @@ let controller;
 let connected = false;
 let eventQueue = Promise.resolve();
 let saveTimer;
+// The folder being browsed in the library ('' is the vault root).
+let currentFolder = '';
 
 function setStatus(message, isError = false) {
   status.textContent = message;
@@ -79,24 +83,101 @@ async function send(bytes) {
 
 // ---------------------------------------------------------------- library
 
+function noteButton(path, showFolder) {
+  const button = document.createElement('button');
+  const title = document.createElement('strong');
+  button.type = 'button';
+  button.className = `note-card${path === controller.current?.path ? ' active' : ''}`;
+  title.textContent = noteTitle(path);
+  button.append(title);
+  if (showFolder) {
+    const folder = document.createElement('small');
+    folder.textContent = dirname(path) || ' ';
+    button.append(folder);
+  }
+  button.addEventListener('click', () => void openNote(path));
+  return button;
+}
+
+function enterFolder(path) {
+  currentFolder = path;
+  void gm.storage.set(FOLDER_KEY, path).catch(() => undefined);
+  renderLibrary();
+  noteList.scrollTop = 0;
+}
+
+function renderFolderPath(root) {
+  const crumbs = [];
+  const parts = currentFolder.slice(root ? root.length + 1 : 0).split('/').filter(Boolean);
+  const rootButton = document.createElement('button');
+  rootButton.type = 'button';
+  rootButton.textContent = root ? root.slice(root.lastIndexOf('/') + 1) : 'Vault';
+  rootButton.disabled = parts.length === 0;
+  rootButton.addEventListener('click', () => enterFolder(root));
+  crumbs.push(rootButton);
+  let path = root;
+  parts.forEach((part, index) => {
+    path = path ? `${path}/${part}` : part;
+    const target = path;
+    const separator = document.createElement('span');
+    separator.textContent = '›';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = part;
+    button.disabled = index === parts.length - 1;
+    button.addEventListener('click', () => enterFolder(target));
+    crumbs.push(separator, button);
+  });
+  folderPath.replaceChildren(...crumbs);
+}
+
 function renderLibrary() {
   const filter = search.value.trim().toLowerCase();
-  const paths = vault.paths.sort((left, right) => left.localeCompare(right));
+  const paths = vault.paths;
   noteCount.textContent = `${paths.length} ${paths.length === 1 ? 'note' : 'notes'}`;
-  noteList.replaceChildren(...paths
-    .filter((path) => !filter || path.toLowerCase().includes(filter))
-    .map((path) => {
+  if (filter) {
+    // Searching looks through every folder.
+    folderPath.hidden = true;
+    noteList.replaceChildren(...paths
+      .filter((path) => path.toLowerCase().includes(filter))
+      .sort((left, right) => compareNames(noteTitle(left), noteTitle(right)))
+      .map((path) => noteButton(path, true)));
+  } else {
+    const root = browseRoot(paths);
+    // Fall back to the root if the folder is gone (removed or re-imported).
+    const exists = paths.some((path) => path.startsWith(`${currentFolder}/`));
+    const inside = !root || currentFolder.startsWith(`${root}/`);
+    if (currentFolder !== root && !(exists && inside)) currentFolder = root;
+    folderPath.hidden = false;
+    renderFolderPath(root);
+    const level = listFolder(paths, currentFolder);
+    const rows = [];
+    if (currentFolder !== root) {
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.className = 'up-card';
+      up.textContent = '‹ Up';
+      up.addEventListener('click', () => enterFolder(dirname(currentFolder)));
+      rows.push(up);
+    }
+    for (const folder of level.folders) {
       const button = document.createElement('button');
-      const title = document.createElement('strong');
-      const folder = document.createElement('small');
+      const icon = document.createElement('span');
+      const name = document.createElement('strong');
+      const count = document.createElement('small');
       button.type = 'button';
-      button.className = `note-card${path === controller.current?.path ? ' active' : ''}`;
-      title.textContent = noteTitle(path);
-      folder.textContent = dirname(path) || ' ';
-      button.append(title, folder);
-      button.addEventListener('click', () => void openNote(path));
-      return button;
-    }));
+      button.className = 'folder-card';
+      icon.className = 'icon';
+      icon.textContent = '▸';
+      name.textContent = folder.name;
+      count.textContent = `${folder.count} ${folder.count === 1 ? 'note' : 'notes'}`;
+      button.append(icon, name, count);
+      button.addEventListener('click', () => enterFolder(folder.path));
+      rows.push(button);
+    }
+    rows.push(...level.notes.map((path) => noteButton(path, false)));
+    noteList.replaceChildren(...rows);
+  }
   sourceList.replaceChildren(...vault.sources.map((source) => {
     const row = document.createElement('div');
     const label = document.createElement('span');
@@ -124,13 +205,15 @@ async function reloadVault() {
 async function importNotes(kind) {
   try {
     setStatus('Opening the file picker…');
-    const count = await vault.pick(kind);
+    const { count, replaced } = await vault.pick(kind);
     if (count === 0) {
       setStatus('Import cancelled.');
       return;
     }
     await reloadVault();
-    setStatus(`Imported ${count} ${count === 1 ? 'file' : 'files'}. The vault has ${vault.paths.length} notes.`);
+    // Re-render the open note in case its text just changed.
+    if (controller.current && vault.notes.has(controller.current.path)) await controller.reopen();
+    setStatus(`Imported ${count} ${count === 1 ? 'file' : 'files'}${replaced ? ` (replacing ${replaced} older ${replaced === 1 ? 'copy' : 'copies'})` : ''}. The vault has ${vault.paths.length} notes.`);
   } catch (error) {
     setStatus(`Import failed: ${error.message}`, true);
   }
@@ -353,6 +436,7 @@ async function initialize() {
   showSettings(settings);
   await controller.applySettings(settings);
 
+  currentFolder = (await gm.storage.get(FOLDER_KEY).catch(() => null))?.value ?? '';
   try {
     await reloadVault();
   } catch (error) {

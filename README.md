@@ -85,6 +85,17 @@ phone (Web plugin, JS)                          glasses (.gmp, C)
 
   Import copies each file into MD Reader's own storage. **Remove** in the
   phone plugin deletes only that copy; the original file stays where it was.
+  Importing a file with the same name as one already imported replaces the
+  older copy, so re-adding an edited note or a fresh vault zip updates it.
+- **Folders:** the MemoMind app's file picker can only pick files, not a
+  folder. To bring in a whole vault with its folders, compress the folder and
+  add the zip. On an iPhone, in Files, long-press the vault folder and choose
+  **Compress**. On a Mac, right-click the folder and choose **Compress**. The
+  phone plugin then lists the vault as folders you can browse: sub-folders
+  first, then notes, both alphabetical (numbers in natural order, so `s2`
+  comes before `s10`). The breadcrumb jumps back up, and the search box looks
+  through every folder. A zip whose notes all sit in one top folder (a zipped
+  `ObsidianVault/`) opens straight inside it.
 
   Links resolve like Obsidian: by note name (preferring the same folder), by
   relative or vault path, with `#heading` targets and `|aliases`. The phone

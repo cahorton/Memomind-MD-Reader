@@ -1,7 +1,7 @@
 // The vault: imported .md files and zipped vaults kept in the App's private
 // file storage, exposed as one set of note paths.
 
-import { noteTitle } from './vault-links.js';
+import { noteTitle, zipPrefix } from './vault-links.js';
 
 const MAX_DIRECTORY_BYTES = 8 * 1024 * 1024;
 const MAX_NOTE_BYTES = 4 * 1024 * 1024;
@@ -22,8 +22,10 @@ export class Vault {
 
   async reload() {
     const result = await this.gm.files.list();
+    // Newest first, so if two copies share a name the latest import wins.
     const files = (Array.isArray(result?.files) ? result.files : [])
-      .filter((file) => /\.(md|markdown|zip)$/iu.test(file.name ?? ''));
+      .filter((file) => /\.(md|markdown|zip)$/iu.test(file.name ?? ''))
+      .sort((left, right) => (right.importedAt ?? 0) - (left.importedAt ?? 0));
     this.sources = [];
     this.notes = new Map();
     this.textCache.clear();
@@ -33,9 +35,11 @@ export class Vault {
       try {
         if (/\.zip$/iu.test(file.name)) {
           const archive = await ZipArchive.open(this, file);
-          for (const entry of archive.entries.values()) {
-            if (!/\.(md|markdown)$/iu.test(entry.name) || isHiddenPath(entry.name)) continue;
-            this.addNote(entry.name, { file, archive, entry: entry.name }, source);
+          const names = [...archive.entries.keys()]
+            .filter((name) => /\.(md|markdown)$/iu.test(name) && !isHiddenPath(name));
+          const prefix = zipPrefix(names, file.name);
+          for (const name of names) {
+            this.addNote(prefix + name, { file, archive, entry: name }, source);
           }
         } else {
           this.addNote(file.name, { file }, source);
@@ -58,7 +62,20 @@ export class Vault {
     const result = await this.gm.files.pick(kind === 'zip'
       ? { extensions: ['zip'], allowMultiple: false }
       : { extensions: ['md', 'markdown'], allowMultiple: true });
-    return Array.isArray(result?.files) ? result.files.length : 0;
+    const picked = Array.isArray(result?.files) ? result.files : [];
+    // Re-importing a file replaces the earlier copy with the same name, so an
+    // edited note or a fresh vault zip takes effect.
+    let replaced = 0;
+    if (picked.length !== 0) {
+      const pickedIds = new Set(picked.map((file) => file.fileId));
+      const names = new Set(picked.map((file) => file.name));
+      const listed = (await this.gm.files.list())?.files ?? [];
+      for (const file of listed) {
+        if (pickedIds.has(file.fileId) || !names.has(file.name)) continue;
+        await this.removeSource(file.fileId).then(() => { replaced += 1; }, () => undefined);
+      }
+    }
+    return { count: picked.length, replaced };
   }
 
   async removeSource(fileId) {

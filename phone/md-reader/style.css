@@ -31,6 +31,14 @@ button.danger { color: #ffb0ab; border-color: #5b3634; }
 .import-row button { padding: 9px 6px; font-size: 13px; }
 input[type="search"] { width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid #2a4840; border-radius: 8px; background: #08100e; }
 .note-list { display: grid; gap: 6px; margin-top: 12px; max-height: 52vh; overflow: auto; }
+.folder-path { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin-top: 12px; color: #6f8c82; font-size: 12px; }
+.folder-path button { padding: 2px 6px; border: 0; background: none; color: #8fd9bb; font-size: 12px; }
+.folder-path button:disabled { color: #e6f2ee; opacity: 1; font-weight: 700; }
+.folder-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; text-align: left; }
+.folder-card .icon { color: #4fd29f; font-weight: 800; }
+.folder-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-card small { color: #6f8c82; font-size: 11px; white-space: nowrap; }
+.up-card { text-align: left; color: #8aa69c; }
 .note-card { display: grid; text-align: left; min-width: 0; }
 .note-card strong, .note-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-card small { color: #6f8c82; font-size: 11px; margin-top: 2px; }

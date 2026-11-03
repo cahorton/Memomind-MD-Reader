@@ -64,3 +64,54 @@ function pickClosest(matches, fromPath) {
 export function noteTitle(path) {
   return stripNoteExtension(basename(path));
 }
+
+// Alphabetical, ignoring case and accents, with numbers in natural order
+// (s2 before s10).
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+export function compareNames(left, right) {
+  return collator.compare(left, right) || (left < right ? -1 : left > right ? 1 : 0);
+}
+
+// One level of the vault tree: sub-folders (with how many notes they hold)
+// and the notes directly inside `folder` ('' is the vault root).
+export function listFolder(paths, folder = '') {
+  const prefix = folder ? `${folder}/` : '';
+  const folders = new Map();
+  const notes = [];
+  for (const path of paths) {
+    if (!path.startsWith(prefix)) continue;
+    const rest = path.slice(prefix.length);
+    const slash = rest.indexOf('/');
+    if (slash < 0) {
+      notes.push(path);
+    } else {
+      const name = rest.slice(0, slash);
+      folders.set(name, (folders.get(name) ?? 0) + 1);
+    }
+  }
+  return {
+    folders: [...folders]
+      .map(([name, count]) => ({ name, path: prefix + name, count }))
+      .sort((left, right) => compareNames(left.name, right.name)),
+    notes: notes.sort((left, right) => compareNames(noteTitle(left), noteTitle(right))),
+  };
+}
+
+// The folder to start browsing in: a vault whose notes all sit in one top
+// folder (a zipped "ObsidianVault/") opens inside it.
+export function browseRoot(paths) {
+  let root = '';
+  for (;;) {
+    const level = listFolder(paths, root);
+    if (level.notes.length !== 0 || level.folders.length !== 1) return root;
+    root = level.folders[0].path;
+  }
+}
+
+// Folder prefix for a zip's notes: none when they already share one top
+// folder, otherwise the zip's own name so each vault stays one folder.
+export function zipPrefix(entryNames, zipName) {
+  const tops = new Set(entryNames.map((name) => (name.includes('/') ? name.slice(0, name.indexOf('/')) : '')));
+  if (tops.size === 1 && !tops.has('')) return '';
+  return `${zipName.replace(/\.zip$/iu, '')}/`;
+}

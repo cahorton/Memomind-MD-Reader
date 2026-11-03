@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { findHeadingOffset, renderMarkdown, utf8Length } from '../phone/md-reader/md-render.js';
-import { resolveNotePath } from '../phone/md-reader/vault-links.js';
+import { browseRoot, listFolder, resolveNotePath, zipPrefix } from '../phone/md-reader/vault-links.js';
 import {
   decodeEvent,
   encodeOpen,
@@ -120,4 +120,34 @@ test('open message layout matches the C parser', () => {
   const data = encodeOpen({ session: 1, docId: 2, totalBytes: 3, offset: 4, linkId: 5, historyDepth: 6, title: 'T' });
   assert.deepEqual([...data], [1, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 5, 6, 84]);
   assert.deepEqual(decodeEvent(Uint8Array.from([1, 4, 0, 0, 0, 9])), { type: 'back', session: 9 });
+});
+
+test('folders list sub-folders then notes, alphabetically with natural numbers', () => {
+  const paths = [
+    'ObsidianVault/s2/b.md', 'ObsidianVault/s10/x.md', 'ObsidianVault/S1/zeta.md',
+    'ObsidianVault/s1/Alpha.md', 'ObsidianVault/Index.md', 'ObsidianVault/apple.md',
+    'ObsidianVault/s2/deep/c.md', 'ObsidianVault/s2/a 10.md', 'ObsidianVault/s2/a 9.md',
+  ];
+  const top = listFolder(paths, 'ObsidianVault');
+  assert.deepEqual(top.folders.map((folder) => [folder.name, folder.count]),
+    [['S1', 1], ['s1', 1], ['s2', 4], ['s10', 1]]);
+  assert.deepEqual(top.notes, ['ObsidianVault/apple.md', 'ObsidianVault/Index.md']);
+  const s2 = listFolder(paths, 'ObsidianVault/s2');
+  assert.deepEqual(s2.folders.map((folder) => folder.path), ['ObsidianVault/s2/deep']);
+  assert.deepEqual(s2.notes, ['ObsidianVault/s2/a 9.md', 'ObsidianVault/s2/a 10.md', 'ObsidianVault/s2/b.md']);
+  assert.deepEqual(listFolder(paths, '').folders.map((folder) => folder.name), ['ObsidianVault']);
+});
+
+test('browsing starts inside a vault that is all one top folder', () => {
+  assert.equal(browseRoot(['ObsidianVault/s1/a.md', 'ObsidianVault/s2/b.md']), 'ObsidianVault');
+  assert.equal(browseRoot(['Only/Inner/a.md', 'Only/Inner/b.md']), 'Only/Inner');
+  assert.equal(browseRoot(['ObsidianVault/s1/a.md', 'Loose.md']), '');
+  assert.equal(browseRoot(['A/x.md', 'B/y.md']), '');
+  assert.equal(browseRoot([]), '');
+});
+
+test('zip notes keep their folders, under the zip name when they have no top folder', () => {
+  assert.equal(zipPrefix(['ObsidianVault/a.md', 'ObsidianVault/s1/b.md'], 'Vault.zip'), '');
+  assert.equal(zipPrefix(['a.md', 's1/b.md'], 'ObsidianVault.zip'), 'ObsidianVault/');
+  assert.equal(zipPrefix(['s1/a.md', 's2/b.md'], 'My Vault.ZIP'), 'My Vault/');
 });
