@@ -63,6 +63,7 @@ button.quiet { margin-top: 10px; padding: 6px 10px; border-color: #1d332d; backg
 .preview-panel { margin-top: 12px; }
 .preview-panel summary { cursor: pointer; color: #8aa69c; font-size: 12px; font-weight: 700; }
 .preview { position: relative; cursor: pointer; height: 46vh; margin-top: 8px; padding: 16px 18px; overflow: auto; border: 1px solid #1f3a33; border-radius: 12px; background: #050a09; color: #9fb7ae; font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preview .page-break { display: block; height: 0; margin: 2px 0; border-top: 1px dashed #2a4840; }
 .preview .on-glasses { color: #f2fff9; background: rgba(79, 210, 159, .08); }
 .preview .link { display: inline; padding: 0; border: 0; border-radius: 3px; background: none; color: inherit; text-decoration: underline; text-decoration-color: #4fd29f; text-underline-offset: 3px; cursor: pointer; }
 .preview .link.selected { background: #e6f2ee; }

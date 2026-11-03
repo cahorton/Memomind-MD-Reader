@@ -66,7 +66,7 @@ test('block structure flattens for the glasses', () => {
     'Text %% hidden %% here <b>html</b> &amp; more ^block1',
   ].join('\n');
   assert.equal(renderMarkdown(source).text, [
-    '# Title', '',
+    '# Title',
     'Some bold, it, gone and [[not a link]] text. snake_case stays.', '',
     '· item one', '  · nested Link', '[ ] todo', '[x] done', '1. first',
     '| quoted', '| NOTE: Heads up', '',
@@ -80,7 +80,7 @@ test('block structure flattens for the glasses', () => {
 test('headings are recorded for heading links', () => {
   const rendered = renderMarkdown('# Top\n\nIntro\n\n## Following links\n\nBody');
   const offset = findHeadingOffset(rendered, 'following links');
-  assert.equal(rendered.text.slice(offset), '## Following links\n\nBody');
+  assert.equal(rendered.text.slice(offset), '## Following links\nBody');
   assert.equal(findHeadingOffset(rendered, 'following-links'), offset);
   assert.equal(findHeadingOffset(rendered, 'missing'), 0);
 });
@@ -181,7 +181,16 @@ test('the built-in tutorial links only to itself, and its heading links land', a
       }
     }
   }
-  // The continuous-scrolling part is long enough to practise on.
-  const continuous = paths.find((path) => path.includes('Continuous'));
-  assert.ok(renderMarkdown(TUTORIAL_NOTES[continuous]).text.length > 2500);
+  // The continuous-scrolling part: one page per stretch, Stretch 1 to 8.
+  const continuous = renderMarkdown(TUTORIAL_NOTES[paths.find((path) => path.includes('Continuous'))]).text;
+  assert.deepEqual(continuous.match(/Stretch \d+/gu), [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `Stretch ${n}`));
+  assert.ok(continuous.split('\f').length >= 13);
+});
+
+test('page breaks become a form feed line; no blank line follows headings', () => {
+  const rendered = renderMarkdown('# Title\n\nIntro.\n\n<!-- pagebreak -->\n\n## Next\n\nBody [[L]].\n\\newpage\nEnd.\n<!-- page break -->\n');
+  assert.equal(rendered.text, '# Title\nIntro.\n\f\n## Next\nBody L.\n\f\nEnd.');
+  assert.deepEqual(linkTexts(rendered), ['L']);
+  // An ordinary HTML comment is still dropped.
+  assert.equal(renderMarkdown('A <!-- note --> B').text, 'A  B');
 });

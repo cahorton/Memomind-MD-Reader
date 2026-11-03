@@ -8,6 +8,11 @@
 const IMAGE_EXTENSIONS = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif|heic)$/iu;
 const EXTERNAL_URL = /^[a-z][a-z0-9+.-]*:/iu;
 const PLACEHOLDER = /\u0000(\d+)\u0000/gu;
+// A forced page break: a line holding only <!-- pagebreak --> (invisible in
+// Obsidian), \pagebreak or \newpage. It becomes a form feed on its own line,
+// where the glasses start a new page.
+export const PAGE_BREAK = '\f';
+const PAGE_BREAK_LINE = /^[ \t]*(?:<!--\s*page[ -]?break\s*-->|\\pagebreak|\\newpage)[ \t]*$/gimu;
 
 export function utf8Length(text) {
   let length = 0;
@@ -35,6 +40,8 @@ class Output {
     this.headings = [];
     this.lineOpen = false;
     this.blankPending = false;
+    this.afterBreak = false;
+    this.afterHeading = false;
   }
 
   append(text) {
@@ -46,13 +53,26 @@ class Output {
   // Starts a new display line, emitting at most one blank line between blocks.
   beginLine() {
     if (this.lineOpen) this.append('\n');
-    if (this.blankPending && this.bytes > 0) this.append('\n');
+    if (this.blankPending && this.bytes > 0 && !this.afterBreak) this.append('\n');
     this.blankPending = false;
+    this.afterBreak = false;
+    this.afterHeading = false;
     this.lineOpen = true;
   }
 
+  // No blank line right after a heading or a page break: the glasses have
+  // few lines to spare.
   blank() {
-    if (this.bytes > 0) this.blankPending = true;
+    if (this.bytes > 0 && !this.afterHeading) this.blankPending = true;
+  }
+
+  pageBreak() {
+    if (this.bytes === 0 || this.afterBreak) return;
+    if (this.lineOpen) this.append('\n');
+    this.append(PAGE_BREAK);
+    this.lineOpen = true;
+    this.blankPending = false;
+    this.afterBreak = true;
   }
 
   link(text, target) {
@@ -62,8 +82,11 @@ class Output {
   }
 
   finish() {
+    // A break at the very end would only make an empty last page.
+    let text = this.parts.join('');
+    if (this.afterBreak) text = text.replace(/\n?\f$/u, '');
     return {
-      text: this.parts.join(''),
+      text,
       links: this.links,
       headings: this.headings,
     };
@@ -207,12 +230,14 @@ export function renderMarkdown(source) {
     .replace(/\t/gu, '    ')
     .replace(/ /gu, ' ');
   text = stripFrontMatter(text)
+    .replace(PAGE_BREAK_LINE, PAGE_BREAK)
     .replace(/%%[\s\S]*?%%/gu, '')
     .replace(/<!--[\s\S]*?-->/gu, '');
   const { references, lines } = collectReferences(text.split('\n'));
   let fence = null;
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/u, '');
+    // Trim trailing whitespace, but keep a page-break form feed.
+    const line = rawLine.replace(/[^\S\f]+$/u, '');
     const fenceMatch = /^\s*(`{3,}|~{3,})/u.exec(line);
     if (fence) {
       if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) {
@@ -227,6 +252,10 @@ export function renderMarkdown(source) {
     if (fenceMatch) {
       fence = fenceMatch[1];
       output.blank();
+      continue;
+    }
+    if (line === PAGE_BREAK) {
+      output.pageBreak();
       continue;
     }
     if (!line.trim()) {
@@ -246,7 +275,7 @@ export function renderMarkdown(source) {
         level: heading[1].length,
         offset: start,
       });
-      output.blank();
+      output.afterHeading = true;
       continue;
     }
     if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/u.test(line)) {

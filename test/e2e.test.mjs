@@ -40,6 +40,7 @@ const notes = {
   'Short.md': '# Short\n\nGo to [[Other|the other note]] or [[Long#Section 33]].\nMissing: [[Nowhere]].\n',
   'Other.md': '# Other\n\nBack to [[Short]].\n',
   'TopLink.md': '[[Other]] is the first word of this note.\n',
+  'Breaks.md': '# A\n\nOne.\n\n<!-- pagebreak -->\n\n# B\n\nTwo [[Other]] and [[Short]].\n<!-- pagebreak -->\nThree.\n',
   'Wrapped.md': '# Wrapped\n\nThis sentence runs on long enough to [[Other|the other note with a long name]] wraps.\n',
   'Long.md': longNote(),
 };
@@ -140,7 +141,7 @@ test('opens a note, highlights links by head turn, follows and goes back', async
     await controller.open('Short.md');
     let view = await state();
     assert.equal(view.title, 'Short');
-    assert.match(view.page, /^# Short\n\nGo to the other note or Long > Section 33\.\nMissing: Nowhere\./u);
+    assert.match(view.page, /^# Short\nGo to the other note or Long > Section 33\.\nMissing: Nowhere\./u);
     assert.equal(view.links, 3);
     assert.equal(view.hint, '3 links');
     assert.equal(view.underlines.length, 3);
@@ -691,9 +692,9 @@ test('the highlighted link gets a drawn box (or inverted text) around each of it
     await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
     let view = await state();
     assert.equal(view.selectedText, 'the other note');
-    // "Go to " is 6 characters of 11 px on line 2 (29 px lines, 24 px font).
+    // "Go to " is 6 characters of 11 px on line 1 (29 px lines, 24 px font).
     // Boxes are placed on the screen: the text area starts at x 20, y 40.
-    assert.deepEqual(view.boxes, [{ x: 20 + 66 - 3, y: 40 + 2 * 29 - 2, w: 14 * 11 + 6, h: 24 + 4, text: '' }]);
+    assert.deepEqual(view.boxes, [{ x: 20 + 66 - 3, y: 40 + 1 * 29 - 2, w: 14 * 11 + 6, h: 24 + 4, text: '' }]);
 
     await controller.applySettings({ linkHighlight: 'inverted' });
     view = await state();
@@ -1027,6 +1028,31 @@ test('a note opened mid-nod is not paged by the rest of the nod', async () => {
     // After the pause, the held look down pages as usual.
     await run('TICK 800');
     assert.equal((await state()).pageIndex, landed + 1);
+  } finally {
+    sim.close();
+  }
+});
+
+test('a page break starts a new glasses page, keeping its links together', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Breaks.md');
+    let view = await state();
+    assert.equal(view.page, '# A\nOne.');
+    await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
+    view = await state();
+    assert.equal(view.page, '# B\nTwo Other and Short.');
+    assert.equal(view.links, 2);
+    await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
+    view = await state();
+    assert.equal(view.page, 'Three.');
+    assert.equal(view.footer, '3 / 3');
+    // Back up, and a jump into the second page lands there.
+    await run(`BTN ${BUTTON.up} ${ACTION.trigger}`);
+    assert.equal((await state()).page, '# B\nTwo Other and Short.');
+    await controller.jumpTo(0);
+    await controller.jumpTo(controller.current.rendered.text.indexOf('Two'));
+    assert.equal((await state()).pageIndex, 1);
   } finally {
     sim.close();
   }

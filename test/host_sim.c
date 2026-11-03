@@ -332,6 +332,8 @@ int main(void)
     char *line = 0;
     size_t capacity = 0;
     setvbuf(stdout, 0, _IOLBF, 0);
+    /* SIM_CHAR_WIDTH tries a wider font, e.g. to check a note's page breaks. */
+    if (getenv("SIM_CHAR_WIDTH") != 0) font_default.char_width = atoi(getenv("SIM_CHAR_WIDTH"));
     setup_host();
     memset(&descriptor, 0, sizeof(descriptor));
     descriptor.struct_size = sizeof(descriptor);

@@ -31,7 +31,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 13U
+#define GLASSES_VERSION 14U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -712,10 +712,11 @@ static void wipe_private_data(md_reader_t *self)
 
 static void record_next_start(md_reader_t *self, uint16_t index, uint32_t end)
 {
-    /* Skip blank lines at the top of the following page. */
+    /* Skip blank lines and a page break at the top of the following page. */
     while (end < self->total_bytes && end >= self->window_offset &&
            end < self->window_offset + self->window_length &&
-           self->window[end - self->window_offset] == '\n')
+           (self->window[end - self->window_offset] == '\n' ||
+            self->window[end - self->window_offset] == '\f'))
         ++end;
     if (end >= self->total_bytes) {
         self->doc_complete = 1U;
@@ -742,9 +743,21 @@ static int build_page(md_reader_t *self, uint16_t index)
     if (self->window_valid == 0U || start < self->window_offset ||
         start >= self->window_offset + self->window_length)
         return BUILD_NEED_WINDOW;
+    /* A page never begins with a page break (one at a window edge is only
+     * seen once its window arrives). */
+    while (start < self->total_bytes &&
+           start < self->window_offset + self->window_length &&
+           (self->window[start - self->window_offset] == '\f' ||
+            self->window[start - self->window_offset] == '\n'))
+        ++start;
+    if (start >= self->total_bytes) return BUILD_ERROR;
+    self->page_starts[index] = start;
+    if (start >= self->window_offset + self->window_length) return BUILD_NEED_WINDOW;
     cursor = start - self->window_offset;
     while (lines < self->lines_per_page && cursor < self->window_length) {
         uint32_t step;
+        /* A form feed line (Markdown <!-- pagebreak -->) ends the page. */
+        if (lines != 0U && self->window[cursor] == '\f') break;
         if (self->window_final == 0U &&
             self->window_length - cursor < WINDOW_GUARD_BYTES)
             return start == self->window_offset ? BUILD_ERROR

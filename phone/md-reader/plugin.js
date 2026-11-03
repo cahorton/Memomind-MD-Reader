@@ -347,6 +347,12 @@ function renderPreview() {
   const pageStart = page?.pageStart ?? 0;
   const pageEnd = page?.pageEnd || pageStart;
   const cuts = [pageStart, pageEnd, ...links.flatMap((link) => [link.start, link.end])];
+  // Page breaks (form feeds) get their own piece, drawn as a dashed rule.
+  for (let index = doc.rendered.text.indexOf('\f'); index >= 0; index = doc.rendered.text.indexOf('\f', index + 1)) {
+    const byte = utf8Length(doc.rendered.text.slice(0, index));
+    // The rule is a block; the newline after the break would add a gap.
+    cuts.push(byte, byte + (doc.rendered.text[index + 1] === '\n' ? 2 : 1));
+  }
   const nodes = [];
   let linkIndex = 0;
   let button = null;
@@ -356,10 +362,12 @@ function renderPreview() {
     while (linkIndex < links.length && links[linkIndex].end <= piece.start) linkIndex += 1;
     const id = linkIndex < links.length && links[linkIndex].start <= piece.start ? linkIndex : -1;
     const span = document.createElement('span');
-    span.textContent = piece.text;
+    const isBreak = piece.text === '\f' || piece.text === '\f\n';
+    span.textContent = isBreak ? '' : piece.text;
     span.dataset.start = String(piece.start);
+    if (isBreak) span.classList.add('page-break');
     if (pageEnd > pageStart && piece.start >= pageStart && piece.end <= pageEnd) {
-      span.className = 'on-glasses';
+      span.classList.add('on-glasses');
       firstOnGlasses ??= span;
     }
     if (id < 0) {

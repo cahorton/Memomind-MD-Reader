@@ -8,7 +8,8 @@ can be followed and retraced.
 ## Tutorial
 
 The phone plugin has a built-in **MD Reader Tutorial** folder of four linked
-notes (`phone/md-reader/tutorial.js`). It covers turning pages and the tilt
+notes (`phone/md-reader/tutorial.js`), written as one short step per glasses
+page with page breaks, so each set of practice links shares a page. It covers turning pages and the tilt
 guide, practice picking between links and going back, a long note for
 continuous scrolling, and display and brightness. It opens on the glasses on
 first start. **Hide tutorial** under the vault list removes it, and **Show
@@ -124,6 +125,10 @@ phone (Web plugin, JS)                          glasses (.gmp, C)
   - lists use `·`, tasks `[ ]`/`[x]`, quotes `|`, callouts `NOTE: …`
   - emphasis, HTML, front matter and `%% comments %%` are stripped
   - images become `[image: alt]`
+  - no blank line is kept right after a heading (the glasses have few lines)
+  - a line holding only `<!-- pagebreak -->` (invisible in Obsidian),
+    `\pagebreak` or `\newpage` forces a new glasses page; the phone shows it
+    as a dashed rule
 
   The note's text on the phone (**Note text**) folds away to reach the
   settings faster; MD Reader remembers whether it was open. Scroll it freely:
