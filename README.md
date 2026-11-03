@@ -114,7 +114,10 @@ phone (Web plugin, JS)                          glasses (.gmp, C)
   - images become `[image: alt]`
 
   The note's text on the phone (**Note text**) folds away to reach the
-  settings faster; MD Reader remembers whether it was open.
+  settings faster; MD Reader remembers whether it was open. Scroll it freely:
+  it follows the glasses' page only when you have not touched it for 8 s.
+  **Tap any word** to show the page holding it on the glasses (tapping a link
+  still opens the link). A jump is not added to the back history.
 
   Import copies each file into MD Reader's own storage. **Remove** in the
   phone plugin deletes only that copy; the original file stays where it was.

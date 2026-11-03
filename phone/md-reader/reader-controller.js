@@ -104,6 +104,14 @@ export class ReaderController {
     return doc;
   }
 
+  // Shows the page holding byte `offset` of the current note (a tap on the
+  // phone's note text). Same note, so the glasses keep their layout.
+  async jumpTo(offset) {
+    if (!this.current) return;
+    const last = Math.max(0, this.current.bytes.length - 1);
+    await this.open(this.current.path, { offset: Math.max(0, Math.min(Math.floor(offset), last)) });
+  }
+
   async reopen() {
     if (!this.current) return;
     await this.open(this.current.path, { offset: this.page?.pageStart ?? 0, linkId: this.page?.linkId ?? NO_LINK });

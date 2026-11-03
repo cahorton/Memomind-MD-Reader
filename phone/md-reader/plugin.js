@@ -2,6 +2,7 @@ import { createGMPlugin } from './vendor/gm-plugin-web-sdk.esm.js';
 import { MD_CHANNEL, MD_EVENT_CHANNEL, decodeEvent } from './md-protocol.js';
 import { ReaderController, defaultSettings } from './reader-controller.js';
 import { Vault } from './vault.js';
+import { utf8Length } from './md-render.js';
 import { PHONE_VERSION } from './version.js';
 import { browseRoot, compareNames, dirname, listFolder, noteTitle } from './vault-links.js';
 
@@ -29,6 +30,10 @@ const backButton = $('#back');
 const autoScrollButton = $('#auto-scroll');
 const autoScrollInfo = $('#auto-scroll-info');
 const previewPanel = $('#preview-panel');
+// The note text follows the glasses' page only when you are not using it.
+const FOLLOW_PAUSE_MS = 8000;
+let lastPreviewTouch = 0;
+let followedPageStart = -1;
 const noteHeading = $('#note-title');
 const breadcrumbs = $('#breadcrumbs');
 const pageInfo = $('#page-info');
@@ -330,6 +335,7 @@ function renderPreview() {
     const id = linkIndex < links.length && links[linkIndex].start <= piece.start ? linkIndex : -1;
     const span = document.createElement('span');
     span.textContent = piece.text;
+    span.dataset.start = String(piece.start);
     if (pageEnd > pageStart && piece.start >= pageStart && piece.end <= pageEnd) {
       span.className = 'on-glasses';
       firstOnGlasses ??= span;
@@ -350,7 +356,42 @@ function renderPreview() {
     button.append(span);
   }
   preview.replaceChildren(...nodes);
-  firstOnGlasses?.scrollIntoView({ block: 'nearest' });
+  followGlasses(firstOnGlasses, pageStart);
+}
+
+// Keeps the glasses' page in view inside the note box (never scrolling the
+// whole phone page), once per page turn, and not while you are scrolling.
+function followGlasses(span, pageStart) {
+  if (!span || pageStart === followedPageStart) return;
+  if (Date.now() - lastPreviewTouch < FOLLOW_PAUSE_MS) return;
+  followedPageStart = pageStart;
+  const top = span.offsetTop;
+  if (top < preview.scrollTop || top > preview.scrollTop + preview.clientHeight - 40) {
+    preview.scrollTop = Math.max(0, top - 12);
+  }
+}
+
+function caretAt(x, y) {
+  if (document.caretPositionFromPoint) {
+    const position = document.caretPositionFromPoint(x, y);
+    return position && { node: position.offsetNode, offset: position.offset };
+  }
+  if (document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(x, y);
+    return range && { node: range.startContainer, offset: range.startOffset };
+  }
+  return null;
+}
+
+// Byte offset in the rendered note of the character at a tap.
+function offsetAtTap(event) {
+  const caret = caretAt(event.clientX, event.clientY);
+  const span = caret?.node?.nodeType === Node.TEXT_NODE ? caret.node.parentElement : null;
+  if (span?.dataset.start !== undefined) {
+    return Number(span.dataset.start) + utf8Length(caret.node.data.slice(0, caret.offset));
+  }
+  const piece = event.target.closest?.('[data-start]');
+  return piece ? Number(piece.dataset.start) : null;
 }
 
 function renderReader() {
@@ -389,7 +430,10 @@ function onControllerChange(reason, detail) {
     setStatus(`No note named "${detail.target.note}" in the vault.`, true);
     return;
   }
-  if (reason === 'open') setStatus(`Showing ${controller.current.title} on the glasses.`);
+  if (reason === 'open') {
+    setStatus(`Showing ${controller.current.title} on the glasses.`);
+    followedPageStart = -1;
+  }
   renderReader();
   scheduleSave();
 }
@@ -530,6 +574,18 @@ $('#recentre').addEventListener('click', async () => {
   await controller.recentre(RECENTRE_DELAY_MS);
   setStatus(`Look where you read: the glasses recentre in ${RECENTRE_DELAY_MS / 1000} s.`);
   log('phone', 'sent recentre');
+});
+for (const type of ['pointerdown', 'touchstart', 'wheel']) {
+  preview.addEventListener(type, () => { lastPreviewTouch = Date.now(); }, { passive: true });
+}
+preview.addEventListener('click', (event) => {
+  // Links open; a tap anywhere else shows that spot on the glasses.
+  if (event.target.closest('.link') || !controller?.current) return;
+  if (getSelection()?.toString()) return;
+  const offset = offsetAtTap(event);
+  if (offset === null) return;
+  log('phone', `jump to byte ${offset}`);
+  void controller.jumpTo(offset).then(() => setStatus('Showing that spot on the glasses.'));
 });
 previewPanel.addEventListener('toggle', () => {
   if (previewPanel.open && controller?.current) renderPreview();

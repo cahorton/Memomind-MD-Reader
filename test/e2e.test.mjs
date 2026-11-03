@@ -918,3 +918,30 @@ test('a gentle nod opens the link; too gentle a move is logged with its speed', 
     sim.close();
   }
 });
+
+test('tapping the phone text jumps the glasses to that spot, keeping the layout', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    const text = controller.current.rendered.text;
+    const target = Buffer.byteLength(text.slice(0, text.indexOf('## Section 20')));
+    await controller.jumpTo(target + 5);
+    let view = await state();
+    assert.match(view.page, /## Section 20/u);
+    assert.ok(controller.page.pageStart <= target + 5 && controller.page.pageEnd > target + 5);
+    assert.equal(controller.history.length, 0, 'a jump is not a link: no history entry');
+    const jumped = view.pageIndex;
+    // Paging continues from there.
+    await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
+    assert.equal((await state()).pageIndex, jumped + 1);
+    // Back near the top, and past the end clamps to the last page.
+    await controller.jumpTo(3);
+    assert.equal((await state()).pageIndex, 0);
+    await controller.jumpTo(10 ** 9);
+    view = await state();
+    assert.equal(view.complete, 1);
+    assert.equal(view.pageIndex, view.pageCount - 1);
+  } finally {
+    sim.close();
+  }
+});
