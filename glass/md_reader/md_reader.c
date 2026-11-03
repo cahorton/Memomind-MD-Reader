@@ -31,7 +31,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 15U
+#define GLASSES_VERSION 16U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -96,6 +96,9 @@
 /* After a note opens (a link, going back, a jump), page turns wait this long:
  * the end of the nod that opened it must not page the new note. */
 #define OPEN_GUARD_MS 2000U
+/* Waking the display recentres after this countdown: the head is still
+ * moving from the nods that woke it. */
+#define WAKE_RECENTRE_MS 2000U
 /* The link-open nod may be slower: down and back up within this long. */
 #define OPEN_NOD_GAP_MS 1000U
 /* Nods are gentler than head turns, so they have their own speed threshold. */
@@ -1569,6 +1572,17 @@ static bool handle_autoscroll(md_reader_t *self, const uint8_t *data,
     return true;
 }
 
+/* Counts down ("Look ahead: recentring in 2"), then takes the pose held as
+ * straight ahead. Head paging waits meanwhile. */
+static void start_recentre(md_reader_t *self, uint32_t delay_ms)
+{
+    if (self->imu_available == 0U) return;
+    leave_zone(self, false);
+    self->recentre_ms = delay_ms == 0U ? 1U : delay_ms;
+    self->recentre_seconds = 0xFFU;
+    diag(self, "recentre in %lu ms", (unsigned long)self->recentre_ms);
+}
+
 static bool handle_recentre(md_reader_t *self, const uint8_t *data, uint32_t length)
 {
     if (length != 4U || self->imu_available == 0U) return false;
@@ -1577,18 +1591,14 @@ static bool handle_recentre(md_reader_t *self, const uint8_t *data, uint32_t len
         self->head_enabled = 1U;
         set_imu(self, true);
     }
-    leave_zone(self, false);
-    self->recentre_ms = read_u16(data + 2);
-    self->recentre_seconds = 0xFFU;
-    if (self->recentre_ms == 0U) self->recentre_ms = 1U;
-    diag(self, "recentre in %lu ms", (unsigned long)self->recentre_ms);
+    start_recentre(self, read_u16(data + 2));
     return true;
 }
 
 /* Runs the recentre countdown; true while head control should hold off. */
 static bool update_recentre(md_reader_t *self, uint32_t elapsed_ms)
 {
-    char text[24];
+    char text[40];
     uint8_t seconds;
     if (self->recentre_ms == 0U) return false;
     if (elapsed_ms >= self->recentre_ms) {
@@ -1604,7 +1614,8 @@ static bool update_recentre(md_reader_t *self, uint32_t elapsed_ms)
     seconds = (uint8_t)((self->recentre_ms + 999U) / 1000U);
     if (seconds != self->recentre_seconds) {
         self->recentre_seconds = seconds;
-        self->libc->snprintf(text, sizeof(text), "Recentre in %u", (unsigned int)seconds);
+        self->libc->snprintf(text, sizeof(text), "Look ahead: recentring in %u",
+                             (unsigned int)seconds);
         show_notice(self, text);
     }
     return true;
@@ -1824,10 +1835,12 @@ static void set_screen(md_reader_t *self, bool on)
         self->shake_count = 0U;
         self->shake_swings = 0U;
         self->shake_sign = 0;
-        show_notice(self, "Display on");
     }
-    /* Raw head tracking pauses while off and recalibrates on waking. */
+    /* Raw head tracking pauses while off. */
     set_imu(self, true);
+    /* On waking, recentre once the head has settled from the nods. */
+    if (on && self->head_enabled != 0U) start_recentre(self, WAKE_RECENTRE_MS);
+    else if (on) show_notice(self, "Display on");
 }
 
 /* Counts one gesture; true on the GESTURE_COUNT-th within the window. */

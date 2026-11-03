@@ -24,7 +24,7 @@ Well done. Each look down turns one page. To go back a page, look up the same wa
 Come back to level between pages.
 `, `
 ## If the display goes dark
-Shaking your head "no" turns the display off. To turn it back on, nod a few times or press any button on the glasses.
+Shaking your head "no" turns the display off. To turn it back on, nod a few times or press any button on the glasses, then look straight ahead while it counts down to recentre.
 `, `
 ## The tilt guide
 The line on the right edge is the tilt guide. The small square is your head. A page turns once the whole square is past one of the two ticks.
@@ -39,7 +39,7 @@ After each page turn, a thin arrow shows the way: down below the text, or up abo
 A single tap on the glasses pauses head scrolling. Tap again to turn it back on.
 `, `
 ## Straight ahead
-If paging feels off, look where you like to read and tap twice, a moment apart: the first tap pauses, the second resumes, centred on where you look.
+If paging feels off, look where you like to read. Tap once, wait a second, then tap again: the first tap pauses, the second resumes, centred on where you look. (Two quick taps open a link instead.)
 **Recentre tilt** on the phone does the same.
 `, `
 ## Links
@@ -111,6 +111,9 @@ Look up to scroll back, or open [[4 Display and brightness|Display and brightnes
 const display = pages(`
 # Display and brightness
 Shake your head "no" a few times, quickly, and the display turns off. To turn it back on, nod a few times or press any button.
+`, `
+## Waking up
+When the display comes back on, look straight ahead. It counts down from 2, then takes where you are looking as level.
 `, `
 ## While it is off
 Nothing scrolls while the display is off. If nodding does not wake it, press any button on the glasses.

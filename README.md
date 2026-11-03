@@ -26,9 +26,9 @@ the tutorial again** under Imported files brings it back.
 | **Nod once** (with a link highlighted) | Open the highlighted link, hands-free |
 | **Double-click** | Open the highlighted link |
 | **Long press** | Back to the previous note (with nothing to go back to: 3 s exit countdown, release to cancel) |
-| **Single click** | Stop auto-scroll if it is running; otherwise pause or resume head control (resuming recentres "neutral" on your current pose) |
+| **Single click** | Stop auto-scroll if it is running; otherwise pause or resume head control (resuming recentres "neutral" on your current pose). To recentre: click, wait a second, click again; two quick clicks are a double-click |
 | **Shake head "no" 3 times** (within ~4 s) | Turn the glasses display off; head tracking and auto-scroll pause |
-| **Nod 3 times** (or press any button) while off | Turn the display back on |
+| **Nod 3 times** (or press any button) while off | Turn the display back on, then recentre after a 2 s "Look ahead" countdown |
 | **Recentre tilt** (phone button) | After a 2 s countdown on the glasses ("Recentre in 2", "1"), the pose you hold becomes straight ahead. Tap, then look where you read. |
 | **Start auto-scroll** (phone button) | A page every *pause*, wherever you look; stops at the end of the note, on a tap, or when another note opens |
 | Ring up/down, page up/down | Previous / next page |

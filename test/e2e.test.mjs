@@ -611,10 +611,12 @@ test('three head shakes turn the display off; three nods turn it back on', async
     assert.equal((await state()).screenOn, 0);
     await run('TICK 500');
     await run(`GESTURE ${GESTURE.nod}`);
+    await run('TICK 100');
     view = await state();
     assert.equal(view.screenOn, 1);
     assert.equal(view.imuMode, 3);
-    assert.equal(view.hint, 'Display on');
+    assert.equal(view.hint, 'Look ahead: recentring in 2');
+    await run('TICK 2000');
 
     // Any button also wakes it, and that press does nothing else.
     for (let index = 0; index < 3; index += 1) {
@@ -681,8 +683,20 @@ test('head shakes and nods are also read from the gyro, with a log on the phone'
     }
     view = await state();
     assert.equal(view.screenOn, 1);
-    assert.equal(view.hint, 'Display on');
+    assert.equal(view.hint, 'Look ahead: recentring in 2');
     assert.ok(diagnostics.includes('screen_turn_on(1) -> 0'));
+    // Straight ahead is taken after the countdown, where the head then is
+    // (here 5 degrees up), not mid-nod.
+    await run('IMU 5 0 0 0');
+    await run('TICK 2100');
+    assert.equal((await state()).hint, 'Recentred');
+    await run('TICK 2500');
+    const page = (await state()).pageIndex;
+    await run('IMU -15 0 0 0');
+    await run('TICK 1300'); // a link is highlighted, so paging waits 1 s
+    assert.equal((await state()).pageIndex, page + 1, 'pages from the new centre');
+    await run('IMU 5 0 0 0');
+    await run('TICK 1500');
 
     // Swings too far apart do not add up.
     await run('IMU 0 0 0 0');
@@ -843,10 +857,10 @@ test('Recentre tilt counts down, then takes the pose you hold as straight ahead'
     await run('TICK 200');
     await controller.recentre(2000);
     await run('TICK 300');
-    assert.equal((await state()).hint, 'Recentre in 2');
+    assert.equal((await state()).hint, 'Look ahead: recentring in 2');
     await run('IMU 15 0 0 0');
     await run('TICK 1000');
-    assert.equal((await state()).hint, 'Recentre in 1');
+    assert.equal((await state()).hint, 'Look ahead: recentring in 1');
     await run('TICK 800');
     let view = await state();
     assert.equal(view.hint, 'Recentred');
