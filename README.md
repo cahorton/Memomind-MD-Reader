@@ -13,6 +13,7 @@ can be followed and retraced.
 | Look **up** past the threshold | Previous page (scrolls up) |
 | Keep looking down/up (continuous mode) | Keeps paging, one page per *pause* |
 | Turn head **right** / **left** (a quick flick) | Highlight the next / previous link on the page |
+| **Nod twice** (with a link highlighted) | Open the highlighted link, hands-free |
 | **Double-click** | Open the highlighted link |
 | **Long press** | Back to the previous note (with nothing to go back to: 3 s exit countdown, release to cancel) |
 | **Single click** | Stop auto-scroll if it is running; otherwise pause or resume head control (resuming recentres "neutral" on your current pose) |
@@ -76,7 +77,17 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
   as the capabilities they offer, IMU and display call results, settings
   received, gestures and shake swings. **Copy log** to share it.
 
-On the glasses, links are underlined. The highlighted link is drawn inverted.
+On the glasses, links are underlined. The highlighted link gets a box drawn
+around each line it covers, or with **Highlighted link: Inverted**, a light
+box with the link text in dark. (LVGL's own label text selection showed only
+the dark text with no background on the glasses, so MD Reader draws the
+highlight itself.)
+
+**Nod twice to open the highlighted link** (default on): four up/down swings,
+each within 0.7 s of the last and at least as fast as **Turn needed for
+links**, open it. After the first nod the status line says `Nod again to
+open`. While a link is highlighted, a page turn waits at least 0.7 s and never
+happens mid-nod, so a nod is not taken as a look down.
 The status line shows the link count or a notice, plus `page / total` (or
 `page  percent%` until the end of the note has been reached).
 

@@ -38,6 +38,7 @@ function longNote() {
 const notes = {
   'Short.md': '# Short\n\nGo to [[Other|the other note]] or [[Long#Section 33]].\nMissing: [[Nowhere]].\n',
   'Other.md': '# Other\n\nBack to [[Short]].\n',
+  'Wrapped.md': '# Wrapped\n\nThis sentence runs on long enough to [[Other|the other note with a long name]] wraps.\n',
   'Long.md': longNote(),
 };
 
@@ -113,8 +114,7 @@ async function harness({ startPitch = 0 } = {}) {
 }
 
 function selectedText(view) {
-  const [start, end] = view.selection;
-  return [...view.page].slice(start, end).join('');
+  return view.selectedText;
 }
 
 // Rendered text of the glasses page as reported by the phone controller.
@@ -143,7 +143,8 @@ test('opens a note, highlights links by head turn, follows and goes back', async
     assert.equal(view.hint, '3 links');
     assert.equal(view.underlines.length, 3);
     assert.equal(view.guideHidden, 0);
-    assert.deepEqual(view.selection, [-1, -1]);
+    assert.equal(view.selectedText, '');
+    assert.deepEqual(view.boxes, []);
 
     // Flick right: the first link. The return swing must not move it back.
     await run('IMU 0 200 0 0');
@@ -675,6 +676,91 @@ test('head shakes and nods are also read from the gyro, with a log on the phone'
     // Firmware gestures are logged too.
     await run('GESTURE 4');
     assert.ok(diagnostics.includes('firmware gesture 4 active=1'));
+  } finally {
+    sim.close();
+  }
+});
+
+test('the highlighted link gets a drawn box (or inverted text) around each of its lines', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Short.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    let view = await state();
+    assert.equal(view.selectedText, 'the other note');
+    // "Go to " is 6 characters of 11 px on line 2 (29 px lines, 24 px font).
+    assert.deepEqual(view.boxes, [{ x: 66 - 3, y: 2 * 29 - 2, w: 14 * 11 + 6, h: 24 + 4, text: '' }]);
+
+    await controller.applySettings({ linkHighlight: 'inverted' });
+    view = await state();
+    assert.deepEqual(view.boxes.map((box) => box.text), ['the other note']);
+
+    // A link wrapped over two lines gets two boxes.
+    await controller.open('Wrapped.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    view = await state();
+    assert.equal(view.boxes.length, 2);
+    assert.equal(view.boxes.map((box) => box.text).join(' '), view.selectedText.replace(/\s+/gu, ' ').trim());
+    // Back to a one-line link: one box, and no leftover from the wrapped one.
+    await controller.open('Short.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    assert.equal((await state()).boxes.length, 1);
+  } finally {
+    sim.close();
+  }
+});
+
+test('two nods open the highlighted link; a nod never turns the page', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Short.md');
+    // Without a highlighted link, nodding does nothing.
+    for (let swing = 0; swing < 4; swing += 1) {
+      await run(`IMU 0 0 0 ${swing % 2 ? 250 : -250}`);
+      await run('TICK 120');
+    }
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    assert.equal((await state()).title, 'Short');
+
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    const hints = [];
+    for (let swing = 0; swing < 4; swing += 1) {
+      await run(`IMU 0 0 0 ${swing % 2 ? 250 : -250}`);
+      await run('TICK 120');
+      hints.push((await state()).hint);
+    }
+    assert.ok(hints.includes('Nod again to open'), hints.join(', '));
+    let view = await state();
+    assert.equal(view.title, 'Other');
+    assert.equal(controller.history.length, 1);
+
+    // A slow nod with a real pitch dip, while a link is highlighted on a long
+    // page: no page turn, and the link still opens.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    await controller.open('Long.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    assert.equal((await state()).selectedText, 'Short');
+    for (let nod = 0; nod < 2; nod += 1) {
+      await run('IMU -20 0 0 -250');
+      await run('TICK 400');
+      await run('IMU 0 0 0 250');
+      await run('TICK 200');
+    }
+    view = await state();
+    assert.equal(view.title, 'Short');
+
+    // Turned off in settings, nods are ignored.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    await controller.applySettings({ nodOpen: false });
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    for (let swing = 0; swing < 4; swing += 1) {
+      await run(`IMU 0 0 0 ${swing % 2 ? 250 : -250}`);
+      await run('TICK 120');
+    }
+    assert.equal((await state()).title, 'Short');
   } finally {
     sim.close();
   }

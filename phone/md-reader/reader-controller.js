@@ -27,6 +27,10 @@ export const defaultSettings = Object.freeze({
   lockBrightness: true,
   // Shake "no" 3 times to turn the glasses display off, nod 3 times to wake.
   gestureSleep: true,
+  // Nod twice to open the highlighted link.
+  nodOpen: true,
+  // How the highlighted link is drawn on the glasses: 'box' or 'inverted'.
+  linkHighlight: 'box',
   brightnessLevel: 0,
   turnThreshold: 120,
   invertPitch: false,

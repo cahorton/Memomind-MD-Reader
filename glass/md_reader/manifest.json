@@ -1,7 +1,7 @@
 {
   "id": "com.memomind.md-reader",
   "name": "MD Reader",
-  "version": 6,
+  "version": 7,
   "abi_version": 256,
   "provides": {
     "protocols": [

@@ -30,7 +30,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 6U
+#define GLASSES_VERSION 7U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -49,6 +49,9 @@
 #define MAX_WINDOW_LINKS 128U
 #define MAX_PAGE_LINKS 32U
 #define MAX_UNDERLINES 40U
+#define MAX_SELECT_BOXES 4U
+#define BOX_PAD_X 3
+#define BOX_PAD_Y 2
 #define TITLE_BYTES 160U
 #define NOTICE_BYTES 96U
 #define MEASURE_BYTES 512U
@@ -71,6 +74,8 @@
 #define FLAG_INVERT_YAW 0x02U
 #define FLAG_TILT_GUIDE 0x04U
 #define FLAG_GESTURE_SLEEP 0x08U
+#define FLAG_NOD_OPEN 0x10U
+#define FLAG_INVERTED_LINK 0x20U
 
 /* Shake "no" this many times to turn the display off, nod to turn it on. */
 #define GESTURE_COUNT 3U
@@ -81,6 +86,11 @@
 #define SHAKE_SWINGS 5U
 #define NOD_SWINGS 5U
 #define SWING_GAP_MS 700U
+/* Two nods (down, up, down, up) open the selected link. While a link is
+ * selected, a page turn waits at least NOD_GUARD_MS so a nod is not
+ * mistaken for a look down. */
+#define OPEN_NOD_SWINGS 4U
+#define NOD_GUARD_MS 700U
 
 #define DEFAULT_PITCH_THRESHOLD 12U
 #define DEFAULT_REPEAT_MS 0U
@@ -141,6 +151,10 @@ typedef struct {
     gm_plugin_lvgl_obj_t *exit_label;
     gm_plugin_lvgl_obj_t *exit_arc;
     gm_plugin_lvgl_obj_t *underline[MAX_UNDERLINES];
+    /* The selected link: an outline box per line, or (inverted) a filled box
+     * with the link text redrawn dark inside it. */
+    gm_plugin_lvgl_obj_t *select_box[MAX_SELECT_BOXES];
+    gm_plugin_lvgl_obj_t *select_text[MAX_SELECT_BOXES];
     gm_plugin_lvgl_obj_t *guide_track;
     gm_plugin_lvgl_obj_t *guide_tick[2];
     gm_plugin_lvgl_obj_t *guide_marker;
@@ -526,13 +540,9 @@ static void show_message(md_reader_t *self, const char *text)
     self->displayed = 0U;
     self->page_link_count = 0U;
     self->selected = -1;
-    if (self->page_label != 0) {
-        self->ui->label_set_selection_start(self->page_label,
-                                            GM_PLUGIN_LVGL_TEXT_SELECTION_OFF);
-        self->ui->label_set_selection_end(self->page_label,
-                                          GM_PLUGIN_LVGL_TEXT_SELECTION_OFF);
-        self->ui->label_set_text(self->page_label, text);
-    }
+    if (self->page_label != 0) self->ui->label_set_text(self->page_label, text);
+    for (uint16_t index = 0U; index < MAX_SELECT_BOXES; ++index)
+        set_hidden(self, self->select_box[index], true);
     for (uint16_t index = 0U; index < MAX_UNDERLINES; ++index)
         set_hidden(self, self->underline[index], true);
     show_arrow(self, 0);
@@ -618,6 +628,11 @@ static void calculate_layout(md_reader_t *self)
                         GM_PLUGIN_LVGL_SELECTOR_MAIN);
     self->ui->style_set(self->page_label, GM_PLUGIN_LVGL_STYLE_TEXT_LINE_SPACE,
                         number(LINE_SPACE), GM_PLUGIN_LVGL_SELECTOR_MAIN);
+    for (uint16_t index = 0U; index < MAX_SELECT_BOXES; ++index) {
+        if (self->select_text[index] != 0)
+            self->ui->style_set(self->select_text[index], GM_PLUGIN_LVGL_STYLE_TEXT_FONT,
+                                font, GM_PLUGIN_LVGL_SELECTOR_MAIN);
+    }
 
     /* Tilt guide: a track in the right margin with ticks at the thresholds. */
     {
@@ -739,33 +754,7 @@ static int build_page(md_reader_t *self, uint16_t index)
     return BUILD_OK;
 }
 
-static uint32_t char_index(const md_reader_t *self, uint32_t byte_count)
-{
-    uint32_t count = 0U;
-    for (uint32_t index = 0U; index < byte_count && self->page_text[index] != '\0';
-         ++index) {
-        if (((uint8_t)self->page_text[index] & 0xC0U) != 0x80U) ++count;
-    }
-    return count;
-}
-
-static void apply_selection(md_reader_t *self)
-{
-    uint32_t page_start = self->page_starts[self->current_page];
-    if (self->selected < 0 || (uint16_t)self->selected >= self->page_link_count) {
-        self->ui->label_set_selection_start(self->page_label,
-                                            GM_PLUGIN_LVGL_TEXT_SELECTION_OFF);
-        self->ui->label_set_selection_end(self->page_label,
-                                          GM_PLUGIN_LVGL_TEXT_SELECTION_OFF);
-    } else {
-        const md_link_t *link = &self->page_links[self->selected];
-        self->ui->label_set_selection_start(
-            self->page_label, char_index(self, link->start - page_start));
-        self->ui->label_set_selection_end(
-            self->page_label, char_index(self, link->end - page_start));
-    }
-    update_hint(self);
-}
+static void apply_selection(md_reader_t *self);
 
 static int16_t measure_prefix(md_reader_t *self, uint32_t from, uint32_t to)
 {
@@ -780,29 +769,84 @@ static int16_t measure_prefix(md_reader_t *self, uint32_t from, uint32_t to)
     return (int16_t)size.x;
 }
 
+/* The part of `link` on page line `line`, as page-text byte offsets and
+ * pixel x positions. False when the link is not on that line. */
+static bool link_segment(md_reader_t *self, const md_link_t *link, uint16_t line,
+                         uint32_t *from_out, uint32_t *to_out,
+                         int16_t *x0_out, int16_t *x1_out)
+{
+    uint32_t page_start = self->page_starts[self->current_page];
+    uint32_t text_end = page_start + self->libc->strlen(self->page_text);
+    uint32_t line_start = self->line_offset[line];
+    uint32_t line_end = line + 1U < self->line_count
+        ? self->line_offset[line + 1U] : text_end;
+    uint32_t from = link->start < line_start ? line_start : link->start;
+    uint32_t to = link->end > line_end ? line_end : link->end;
+    /* Not the line break, nor the space before a wrap. */
+    while (to > from && (self->page_text[to - 1U - page_start] == '\n' ||
+                         self->page_text[to - 1U - page_start] == ' '))
+        --to;
+    if (to <= from) return false;
+    *x0_out = measure_prefix(self, line_start - page_start, from - page_start);
+    *x1_out = measure_prefix(self, line_start - page_start, to - page_start);
+    *from_out = from - page_start;
+    *to_out = to - page_start;
+    return *x1_out > *x0_out;
+}
+
+static void apply_selection(md_reader_t *self)
+{
+    uint16_t used = 0U;
+    bool inverted = (self->flags & FLAG_INVERTED_LINK) != 0U;
+    if (self->selected >= 0 && (uint16_t)self->selected < self->page_link_count) {
+        const md_link_t *link = &self->page_links[self->selected];
+        for (uint16_t line = 0U; line < self->line_count && used < MAX_SELECT_BOXES; ++line) {
+            uint32_t from;
+            uint32_t to;
+            int16_t x0;
+            int16_t x1;
+            gm_plugin_lvgl_obj_t *box = self->select_box[used];
+            gm_plugin_lvgl_obj_t *text = self->select_text[used];
+            if (!link_segment(self, link, line, &from, &to, &x0, &x1)) continue;
+            self->ui->obj_set_pos(box, x0 - BOX_PAD_X,
+                                  (int16_t)(line * self->line_height - BOX_PAD_Y));
+            self->ui->obj_set_size(box, x1 - x0 + BOX_PAD_X * 2,
+                                   self->font_height + BOX_PAD_Y * 2);
+            self->ui->style_set(box, GM_PLUGIN_LVGL_STYLE_BG_OPA,
+                                number(inverted ? GM_PLUGIN_LVGL_OPA_COVER
+                                                : GM_PLUGIN_LVGL_OPA_TRANSPARENT),
+                                GM_PLUGIN_LVGL_SELECTOR_MAIN);
+            self->ui->style_set(box, GM_PLUGIN_LVGL_STYLE_BORDER_WIDTH,
+                                number(inverted ? 0 : 2), GM_PLUGIN_LVGL_SELECTOR_MAIN);
+            if (inverted) {
+                uint32_t length = to - from;
+                if (length >= MEASURE_BYTES) length = MEASURE_BYTES - 1U;
+                self->libc->memcpy(self->measure, self->page_text + from, length);
+                self->measure[length] = '\0';
+                self->ui->label_set_text(text, self->measure);
+            }
+            set_hidden(self, text, !inverted);
+            set_hidden(self, box, false);
+            ++used;
+        }
+    }
+    for (; used < MAX_SELECT_BOXES; ++used) set_hidden(self, self->select_box[used], true);
+    update_hint(self);
+}
+
 static void layout_underlines(md_reader_t *self)
 {
     uint16_t used = 0U;
-    uint32_t page_start = self->page_starts[self->current_page];
-    uint32_t text_end = page_start + self->libc->strlen(self->page_text);
     for (uint16_t link = 0U; link < self->page_link_count; ++link) {
         for (uint16_t line = 0U; line < self->line_count; ++line) {
-            uint32_t line_start = self->line_offset[line];
-            uint32_t line_end = line + 1U < self->line_count
-                ? self->line_offset[line + 1U] : text_end;
-            uint32_t from = self->page_links[link].start;
-            uint32_t to = self->page_links[link].end;
+            uint32_t from;
+            uint32_t to;
             int16_t x0;
             int16_t x1;
-            int16_t y;
-            if (from < line_start) from = line_start;
-            if (to > line_end) to = line_end;
-            while (to > from && self->page_text[to - 1U - page_start] == '\n') --to;
-            if (to <= from || used >= MAX_UNDERLINES) continue;
-            x0 = measure_prefix(self, line_start - page_start, from - page_start);
-            x1 = measure_prefix(self, line_start - page_start, to - page_start);
-            if (x1 <= x0) continue;
-            y = (int16_t)(line * self->line_height + self->font_height);
+            int16_t y = (int16_t)(line * self->line_height + self->font_height);
+            if (used >= MAX_UNDERLINES ||
+                !link_segment(self, &self->page_links[link], line, &from, &to, &x0, &x1))
+                continue;
             self->underline_points[used][0].x = x0;
             self->underline_points[used][0].y = y;
             self->underline_points[used][1].x = x1;
@@ -1168,6 +1212,8 @@ static void turn_page(md_reader_t *self, int8_t zone)
  *    a quick return to the old pose soon after restores it without paging.
  *    Continuous mode skips this once neutral is confirmed.
  */
+static bool nod_opens_link(const md_reader_t *self);
+
 static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
 {
     int16_t enter = (int16_t)self->pitch_threshold;
@@ -1210,7 +1256,14 @@ static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
     }
     self->zone_elapsed += dt;
     if (self->tilt_fired == 0U) {
-        if (self->zone_elapsed < self->dwell_ms) return;
+        uint32_t dwell = self->dwell_ms;
+        /* With a link selected a nod may be starting: wait a little longer,
+         * and never turn the page in the middle of nodding. */
+        if (nod_opens_link(self)) {
+            if (dwell < NOD_GUARD_MS) dwell = NOD_GUARD_MS;
+            if (self->nod_swings >= 2U) return;
+        }
+        if (self->zone_elapsed < dwell) return;
         self->tilt_fired = 1U;
         self->repeat_elapsed = 0U;
         turn_page(self, self->tilt_zone);
@@ -1296,24 +1349,34 @@ static bool count_swing(int8_t *sign, uint8_t *swings, uint32_t *gap,
     return true;
 }
 
-static void update_sleep_gestures(md_reader_t *self,
-                                  const gm_plugin_imu_sample_t *sample,
-                                  uint32_t dt)
+static bool nod_opens_link(const md_reader_t *self)
+{
+    return (self->flags & FLAG_NOD_OPEN) != 0U && self->head_enabled != 0U &&
+        self->screen_off == 0U && self->selected >= 0;
+}
+
+/* Gyro gestures: shake to turn the display off, nod to turn it on, and two
+ * nods to open the selected link. */
+static void update_head_gestures(md_reader_t *self,
+                                 const gm_plugin_imu_sample_t *sample,
+                                 uint32_t dt)
 {
     int32_t horizontal = (int32_t)sample->gyro_raw[0] - sample->gyro_raw[1];
     int32_t vertical = sample->gyro_raw[2];
     int32_t threshold = (int32_t)self->turn_threshold;
+    bool sleep = (self->flags & FLAG_GESTURE_SLEEP) != 0U;
     char text[24];
-    if (self->screen_off == 0U) {
-        if (!count_swing(&self->shake_sign, &self->shake_swings, &self->shake_gap,
-                         horizontal, threshold, dt))
-            return;
+    if (sleep && self->screen_off == 0U &&
+        count_swing(&self->shake_sign, &self->shake_swings, &self->shake_gap,
+                    horizontal, threshold, dt)) {
         if (self->shake_swings >= SHAKE_SWINGS) {
             self->shake_swings = 0U;
             self->shake_sign = 0;
             diag(self, "shake detected from gyro");
             set_screen(self, false);
-        } else if (self->shake_swings >= 2U) {
+            return;
+        }
+        if (self->shake_swings >= 2U) {
             /* A link flick and its return make two swings; show from three. */
             if (self->shake_swings >= 3U) {
                 self->libc->snprintf(text, sizeof(text), "Shake %u/%u",
@@ -1324,19 +1387,30 @@ static void update_sleep_gestures(md_reader_t *self,
             diag(self, "shake swing %u/%u (rate %ld)", (unsigned int)self->shake_swings,
                  (unsigned int)SHAKE_SWINGS, (long)horizontal);
         }
-    } else {
-        if (!count_swing(&self->nod_sign, &self->nod_swings, &self->nod_gap,
-                         vertical, threshold, dt))
-            return;
-        diag(self, "nod swing %u/%u (rate %ld)", (unsigned int)self->nod_swings,
-             (unsigned int)NOD_SWINGS, (long)vertical);
-        if (self->nod_swings >= NOD_SWINGS) {
-            self->nod_swings = 0U;
-            self->nod_sign = 0;
-            diag(self, "nod detected from gyro");
-            set_screen(self, true);
-        }
     }
+    if (!(sleep && self->screen_off != 0U) && !nod_opens_link(self)) {
+        self->nod_swings = 0U;
+        self->nod_sign = 0;
+        return;
+    }
+    if (!count_swing(&self->nod_sign, &self->nod_swings, &self->nod_gap,
+                     vertical, threshold, dt))
+        return;
+    diag(self, "nod swing %u (rate %ld)", (unsigned int)self->nod_swings, (long)vertical);
+    if (self->screen_off != 0U) {
+        if (self->nod_swings < NOD_SWINGS) return;
+        self->nod_swings = 0U;
+        self->nod_sign = 0;
+        diag(self, "nod detected from gyro");
+        set_screen(self, true);
+        return;
+    }
+    if (self->nod_swings == 2U) show_notice(self, "Nod again to open");
+    if (self->nod_swings < OPEN_NOD_SWINGS) return;
+    self->nod_swings = 0U;
+    self->nod_sign = 0;
+    diag(self, "double nod: open link");
+    follow_selected(self);
 }
 
 static void update_head(md_reader_t *self, uint32_t elapsed_ms)
@@ -1350,7 +1424,7 @@ static void update_head(md_reader_t *self, uint32_t elapsed_ms)
     dt = self->imu_elapsed > 250U ? 250U : self->imu_elapsed;
     self->imu_elapsed = 0U;
     if (self->host->imu_read(&sample) != GM_PLUGIN_OK) return;
-    if ((self->flags & FLAG_GESTURE_SLEEP) != 0U) update_sleep_gestures(self, &sample, dt);
+    update_head_gestures(self, &sample, dt);
     if (self->head_enabled == 0U || self->screen_off != 0U) return;
     pitch = sample.pitch_degrees;
     if ((self->flags & FLAG_INVERT_PITCH) != 0U) pitch = (int16_t)-pitch;
@@ -1574,6 +1648,8 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
     if (self->head_enabled != previous_head ||
         ((self->flags ^ previous_flags) & (FLAG_INVERT_PITCH | FLAG_GESTURE_SLEEP)) != 0U)
         set_imu(self, true);
+    if (((self->flags ^ previous_flags) & FLAG_INVERTED_LINK) != 0U && self->displayed != 0U)
+        apply_selection(self);
     update_guide_visibility(self);
     update_hint(self);
     return true;
@@ -1852,14 +1928,38 @@ static gm_plugin_result_t create_ui(md_reader_t *self)
     self->ui->label_set_long_mode(self->page_label, GM_PLUGIN_LVGL_LABEL_WRAP);
     self->ui->style_set(self->page_label, GM_PLUGIN_LVGL_STYLE_TEXT_COLOR,
                         color(COLOR_TEXT), GM_PLUGIN_LVGL_SELECTOR_MAIN);
-    /* The selected link is drawn inverted through LVGL's label selection. */
-    self->ui->style_set(self->page_label, GM_PLUGIN_LVGL_STYLE_BG_COLOR,
-                        color(COLOR_TEXT), GM_PLUGIN_LVGL_SELECTOR_SELECTED);
-    self->ui->style_set(self->page_label, GM_PLUGIN_LVGL_STYLE_TEXT_COLOR,
-                        color(COLOR_BLACK), GM_PLUGIN_LVGL_SELECTOR_SELECTED);
     for (uint16_t index = 0U; index < MAX_UNDERLINES; ++index) {
         self->underline[index] = create_line(self, self->viewport, COLOR_DIM, 1);
         if (self->underline[index] == 0) return GM_PLUGIN_ENOMEM;
+    }
+    /* Drawn by the plugin rather than with LVGL's label text selection, which
+     * showed only the dark text (no background) on the glasses. */
+    for (uint16_t index = 0U; index < MAX_SELECT_BOXES; ++index) {
+        gm_plugin_lvgl_obj_t *box = self->ui->obj_create(self->viewport);
+        gm_plugin_lvgl_obj_t *text = box != 0 ? self->ui->label_create(box) : 0;
+        gm_plugin_lvgl_style_value_t font = {0};
+        if (box == 0 || text == 0) return GM_PLUGIN_ENOMEM;
+        clear_style_box(self, box);
+        self->ui->obj_clear_flag(box, GM_PLUGIN_LVGL_FLAG_SCROLLABLE);
+        self->ui->style_set(box, GM_PLUGIN_LVGL_STYLE_RADIUS, number(3),
+                            GM_PLUGIN_LVGL_SELECTOR_MAIN);
+        self->ui->style_set(box, GM_PLUGIN_LVGL_STYLE_BORDER_COLOR, color(COLOR_TEXT),
+                            GM_PLUGIN_LVGL_SELECTOR_MAIN);
+        self->ui->style_set(box, GM_PLUGIN_LVGL_STYLE_BORDER_OPA,
+                            number(GM_PLUGIN_LVGL_OPA_COVER), GM_PLUGIN_LVGL_SELECTOR_MAIN);
+        self->ui->style_set(box, GM_PLUGIN_LVGL_STYLE_BG_COLOR, color(COLOR_TEXT),
+                            GM_PLUGIN_LVGL_SELECTOR_MAIN);
+        self->ui->label_set_long_mode(text, GM_PLUGIN_LVGL_LABEL_CLIP);
+        self->ui->obj_set_pos(text, BOX_PAD_X, BOX_PAD_Y);
+        self->ui->style_set(text, GM_PLUGIN_LVGL_STYLE_TEXT_COLOR, color(COLOR_BLACK),
+                            GM_PLUGIN_LVGL_SELECTOR_MAIN);
+        font.ptr = self->ui->font_default;
+        self->ui->style_set(text, GM_PLUGIN_LVGL_STYLE_TEXT_FONT, font,
+                            GM_PLUGIN_LVGL_SELECTOR_MAIN);
+        self->ui->label_set_text(text, "");
+        self->ui->obj_add_flag(box, GM_PLUGIN_LVGL_FLAG_HIDDEN);
+        self->select_box[index] = box;
+        self->select_text[index] = text;
     }
 
     self->hint_label = create_label(self, COLOR_DIM, GM_PLUGIN_LVGL_LABEL_CLIP);
@@ -1932,7 +2032,7 @@ static gm_plugin_result_t on_start(void *opaque)
     self->settings_received = 0U;
     self->dwell_ms = DEFAULT_DWELL_MS;
     self->turn_threshold = DEFAULT_TURN_THRESHOLD;
-    self->flags = FLAG_TILT_GUIDE | FLAG_GESTURE_SLEEP;
+    self->flags = FLAG_TILT_GUIDE | FLAG_GESTURE_SLEEP | FLAG_NOD_OPEN;
     self->font_mode = FONT_DEFAULT;
     self->connected = 1U;
     self->exit_active = 0U;
@@ -2057,6 +2157,8 @@ static void on_stop(void *opaque)
     self->scroll_arrow = 0;
     for (uint16_t index = 0U; index < MAX_UNDERLINES; ++index)
         self->underline[index] = 0;
+    for (uint16_t index = 0U; index < MAX_SELECT_BOXES; ++index)
+        self->select_box[index] = self->select_text[index] = 0;
 }
 
 gm_plugin_result_t gm_plugin_entry(const gm_plugin_host_api_t *host,

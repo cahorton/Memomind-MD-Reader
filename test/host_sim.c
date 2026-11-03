@@ -281,6 +281,32 @@ static void dump(void)
            r->guide_tick[1] && r->guide_tick[1]->point_count ? (int)r->guide_tick[1]->points[0].y : -1,
            r->viewport_y + r->viewport_height / 2,
            r->guide_marker ? r->guide_marker->y + 4 : -1);
+    printf(",\"selectedText\":");
+    if (r->selected >= 0 && (uint16_t)r->selected < r->page_link_count) {
+        static char selected_text[512];
+        uint32_t page_start = r->page_starts[r->current_page];
+        uint32_t from = r->page_links[r->selected].start - page_start;
+        uint32_t length = r->page_links[r->selected].end - r->page_links[r->selected].start;
+        if (length >= sizeof(selected_text)) length = sizeof(selected_text) - 1U;
+        memcpy(selected_text, r->page_text + from, length);
+        selected_text[length] = '\0';
+        json_string(selected_text);
+    } else {
+        json_string("");
+    }
+    printf(",\"boxes\":[");
+    first = 1;
+    for (unsigned i = 0; i < MAX_SELECT_BOXES; ++i) {
+        gm_plugin_lvgl_obj_t *box = r->select_box[i];
+        if (box == 0 || box->hidden) continue;
+        printf("%s{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"text\":", first ? "" : ",",
+               box->x, box->y, box->w, box->h);
+        json_string(r->select_text[i] && !r->select_text[i]->hidden ? r->select_text[i]->text : "");
+        printf("}");
+        first = 0;
+    }
+    printf("]");
+    first = 1;
     printf(",\"underlines\":[");
     for (unsigned i = 0; i < MAX_UNDERLINES; ++i) {
         gm_plugin_lvgl_obj_t *line = r->underline[i];

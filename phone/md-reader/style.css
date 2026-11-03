@@ -72,6 +72,7 @@ input[type="search"] { width: 100%; margin-top: 12px; padding: 8px 10px; border:
 .settings-grid label { display: grid; gap: 4px; color: #8aa69c; font-size: 12px; }
 .settings-grid label output { color: #e6f2ee; font-weight: 700; }
 .settings-grid label.toggle { display: flex; align-items: center; gap: 8px; color: #c9dcd5; font-size: 13px; }
+select { width: 100%; padding: 6px 8px; border: 1px solid #2a4840; border-radius: 8px; background: #08100e; }
 input[type="range"] { width: 100%; accent-color: #4fd29f; }
 input[type="checkbox"] { accent-color: #4fd29f; width: 16px; height: 16px; }
 .log-panel { margin-top: 14px; padding: 10px 14px; border: 1px solid #1d332d; border-radius: 12px; color: #8aa69c; font-size: 12px; }

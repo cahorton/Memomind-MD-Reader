@@ -46,6 +46,8 @@ const settingInputs = {
   invertYaw: $('#invert-yaw'),
   largeFont: $('#large-font'),
   gestureSleep: $('#gesture-sleep'),
+  nodOpen: $('#nod-open'),
+  linkHighlight: $('#link-highlight'),
   lockBrightness: $('#lock-brightness'),
   brightnessLevel: $('#brightness'),
 };
@@ -394,7 +396,8 @@ function showSettings(settings) {
 function readSettings() {
   const settings = {};
   for (const [name, input] of Object.entries(settingInputs)) {
-    settings[name] = input.type === 'checkbox' ? input.checked : Number(input.value);
+    settings[name] = input.type === 'checkbox' ? input.checked
+      : input.tagName === 'SELECT' ? input.value : Number(input.value);
   }
   settings.settingsVersion = SETTINGS_VERSION;
   return settings;
