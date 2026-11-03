@@ -780,3 +780,45 @@ test('one nod opens the highlighted link; a nod never turns the page', async () 
     sim.close();
   }
 });
+
+test('Recentre tilt counts down, then takes the pose you hold as straight ahead', async () => {
+  const { sim, controller, run, state, diagnostics } = await harness();
+  try {
+    await controller.open('Long.md');
+    // Tap on the phone while looking down at it, then look up to read.
+    await run('IMU -30 0 0 0');
+    await run('TICK 200');
+    await controller.recentre(2000);
+    await run('TICK 300');
+    assert.equal((await state()).hint, 'Recentre in 2');
+    await run('IMU 15 0 0 0');
+    await run('TICK 1000');
+    assert.equal((await state()).hint, 'Recentre in 1');
+    await run('TICK 800');
+    let view = await state();
+    assert.equal(view.hint, 'Recentred');
+    assert.equal(view.pageIndex, 0, 'moving during the countdown must not page');
+    assert.ok(diagnostics.includes('recentred'));
+
+    // 15 degrees up is now straight ahead: holding it does nothing...
+    await run('TICK 2500');
+    assert.equal((await state()).pageIndex, 0);
+    // ...and 20 degrees below it pages down.
+    await run('IMU -5 0 0 0');
+    await run('TICK 600');
+    assert.equal((await state()).pageIndex, 1);
+
+    // Recentring also resumes head control after a tap paused it.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    await run(`BTN ${BUTTON.primary} ${ACTION.single}`);
+    assert.equal((await state()).headEnabled, 0);
+    await controller.recentre(500);
+    await run('TICK 1000');
+    view = await state();
+    assert.equal(view.headEnabled, 1);
+    assert.equal(view.hint, 'Recentred');
+  } finally {
+    sim.close();
+  }
+});

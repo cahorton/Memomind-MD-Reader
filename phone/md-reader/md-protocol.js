@@ -89,6 +89,13 @@ export function encodeSettings(settings) {
   return data;
 }
 
+// Recentre: after delayMs the glasses take the current head pose as neutral.
+export function encodeRecentre(delayMs) {
+  const { data, view } = header(4, 7);
+  view.setUint16(2, Math.max(0, Math.min(10000, Math.round(delayMs))));
+  return data;
+}
+
 // Auto-scroll: a page every intervalMs regardless of head position.
 export function encodeAutoScroll({ session, on, intervalMs }) {
   const { data, view } = header(9, 6);

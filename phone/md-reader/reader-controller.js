@@ -7,6 +7,7 @@ import {
   NO_LINK,
   encodeAutoScroll,
   encodeNotice,
+  encodeRecentre,
   encodeOpen,
   encodeSettings,
   encodeWindow,
@@ -111,6 +112,10 @@ export class ReaderController {
     await this.send(encodeSettings(this.settings));
     // A running auto-scroll picks up a new pause.
     if (this.autoScroll) await this.setAutoScroll(true);
+  }
+
+  async recentre(delayMs = 2000) {
+    await this.send(encodeRecentre(delayMs));
   }
 
   async setAutoScroll(on) {

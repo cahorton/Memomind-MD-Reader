@@ -19,6 +19,7 @@ can be followed and retraced.
 | **Single click** | Stop auto-scroll if it is running; otherwise pause or resume head control (resuming recentres "neutral" on your current pose) |
 | **Shake head "no" 3 times** (within ~4 s) | Turn the glasses display off; head tracking and auto-scroll pause |
 | **Nod 3 times** (or press any button) while off | Turn the display back on |
+| **Recentre tilt** (phone button) | After a 2 s countdown on the glasses ("Recentre in 2", "1"), the pose you hold becomes straight ahead. Tap, then look where you read. |
 | **Start auto-scroll** (phone button) | A page every *pause*, wherever you look; stops at the end of the note, on a tap, or when another note opens |
 | Ring up/down, page up/down | Previous / next page |
 | Ring left/right | Previous / next link |
@@ -108,6 +109,9 @@ phone (Web plugin, JS)                          glasses (.gmp, C)
   - lists use `·`, tasks `[ ]`/`[x]`, quotes `|`, callouts `NOTE: …`
   - emphasis, HTML, front matter and `%% comments %%` are stripped
   - images become `[image: alt]`
+
+  The note's text on the phone (**Note text**) folds away to reach the
+  settings faster; MD Reader remembers whether it was open.
 
   Import copies each file into MD Reader's own storage. **Remove** in the
   phone plugin deletes only that copy; the original file stays where it was.

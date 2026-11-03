@@ -59,13 +59,15 @@ input[type="search"] { width: 100%; margin-top: 12px; padding: 8px 10px; border:
 .title-block h2 { font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .breadcrumbs { color: #6f8c82; font-size: 12px; margin-top: 2px; min-height: 1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page-info { color: #8aa69c; font-size: 12px; white-space: nowrap; }
-.preview { height: 46vh; margin-top: 14px; padding: 16px 18px; overflow: auto; border: 1px solid #1f3a33; border-radius: 12px; background: #050a09; color: #9fb7ae; font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preview-panel { margin-top: 12px; }
+.preview-panel summary { cursor: pointer; color: #8aa69c; font-size: 12px; font-weight: 700; }
+.preview { height: 46vh; margin-top: 8px; padding: 16px 18px; overflow: auto; border: 1px solid #1f3a33; border-radius: 12px; background: #050a09; color: #9fb7ae; font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .preview .on-glasses { color: #f2fff9; background: rgba(79, 210, 159, .08); }
 .preview .link { display: inline; padding: 0; border: 0; border-radius: 3px; background: none; color: inherit; text-decoration: underline; text-decoration-color: #4fd29f; text-underline-offset: 3px; cursor: pointer; }
 .preview .link.selected { background: #e6f2ee; }
 .preview .link.selected span { color: #050a09; }
 
-.reader-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.reader-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
 .reader-actions .hint { color: #8aa69c; font-size: 12px; }
 .settings { margin-top: 18px; padding: 12px 14px; border: 1px solid #1d332d; border-radius: 12px; }
 .settings summary { cursor: pointer; font-weight: 700; }

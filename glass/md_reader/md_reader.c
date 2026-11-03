@@ -21,6 +21,7 @@
 #define COMMAND_CLOSE 4U
 #define COMMAND_NOTICE 5U
 #define COMMAND_AUTOSCROLL 6U
+#define COMMAND_RECENTRE 7U
 
 #define EVENT_NEED_WINDOW 1U
 #define EVENT_PAGE 2U
@@ -30,7 +31,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 8U
+#define GLASSES_VERSION 9U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -267,6 +268,9 @@ typedef struct {
      * continuous mode, so a start taken while looking at the phone heals. */
     uint8_t neutral_confirmed;
     uint8_t confirm_on_calibration;
+    /* Phone "Recentre tilt": counts down, then recalibrates neutral. */
+    uint32_t recentre_ms;
+    uint8_t recentre_seconds;
     int8_t tilt_zone;
     uint8_t tilt_fired;
     uint32_t zone_elapsed;
@@ -1526,6 +1530,47 @@ static bool handle_autoscroll(md_reader_t *self, const uint8_t *data,
     return true;
 }
 
+static bool handle_recentre(md_reader_t *self, const uint8_t *data, uint32_t length)
+{
+    if (length != 4U || self->imu_available == 0U) return false;
+    /* Recentring means head control is wanted, even if a tap paused it. */
+    if (self->head_enabled == 0U) {
+        self->head_enabled = 1U;
+        set_imu(self, true);
+    }
+    leave_zone(self, false);
+    self->recentre_ms = read_u16(data + 2);
+    self->recentre_seconds = 0xFFU;
+    if (self->recentre_ms == 0U) self->recentre_ms = 1U;
+    diag(self, "recentre in %lu ms", (unsigned long)self->recentre_ms);
+    return true;
+}
+
+/* Runs the recentre countdown; true while head control should hold off. */
+static bool update_recentre(md_reader_t *self, uint32_t elapsed_ms)
+{
+    char text[24];
+    uint8_t seconds;
+    if (self->recentre_ms == 0U) return false;
+    if (elapsed_ms >= self->recentre_ms) {
+        self->recentre_ms = 0U;
+        reset_head_state(self);
+        self->confirm_on_calibration = 1U;
+        update_guide_visibility(self);
+        show_notice(self, "Recentred");
+        diag(self, "recentred");
+        return false;
+    }
+    self->recentre_ms -= elapsed_ms;
+    seconds = (uint8_t)((self->recentre_ms + 999U) / 1000U);
+    if (seconds != self->recentre_seconds) {
+        self->recentre_seconds = seconds;
+        self->libc->snprintf(text, sizeof(text), "Recentre in %u", (unsigned int)seconds);
+        show_notice(self, text);
+    }
+    return true;
+}
+
 static bool handle_open(md_reader_t *self, const uint8_t *data, uint32_t length)
 {
     uint32_t session;
@@ -1677,6 +1722,7 @@ static bool receive_message(md_reader_t *self, const uint8_t *data,
     case COMMAND_SETTINGS: return handle_settings(self, data, length);
     case COMMAND_NOTICE: return handle_notice(self, data, length);
     case COMMAND_AUTOSCROLL: return handle_autoscroll(self, data, length);
+    case COMMAND_RECENTRE: return handle_recentre(self, data, length);
     case COMMAND_CLOSE:
         if (length != 6U || read_u32(data + 2) != self->session) return false;
         wipe_private_data(self);
@@ -2044,6 +2090,7 @@ static gm_plugin_result_t on_start(void *opaque)
     self->arrow_shown = 0;
     self->arrow_elapsed = 0U;
     self->confirm_on_calibration = 0U;
+    self->recentre_ms = 0U;
     self->brightness_lock = 0U;
     self->brightness_level = 0U;
     self->brightness_blocked = 0U;
@@ -2114,6 +2161,9 @@ static void on_loop(void *opaque, uint32_t elapsed_ms)
         continue_seek(self);
     }
     update_autoscroll(self, elapsed_ms);
+    /* While the recentre countdown runs, head moves (looking up from the
+     * phone) must not page. */
+    if (update_recentre(self, elapsed_ms)) return;
     update_head(self, elapsed_ms);
 }
 

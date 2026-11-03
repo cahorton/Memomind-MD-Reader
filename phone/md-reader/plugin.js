@@ -11,6 +11,8 @@ const SETTINGS_VERSION = 3;
 const STATE_KEY = 'md-reader.state.v1';
 const STATE_SAVE_DELAY_MS = 800;
 const FOLDER_KEY = 'md-reader.folder.v1';
+const UI_KEY = 'md-reader.ui.v1';
+const RECENTRE_DELAY_MS = 2000;
 
 const $ = (selector) => document.querySelector(selector);
 const bridgeState = $('#bridge-state');
@@ -26,6 +28,7 @@ const readerView = $('#reader');
 const backButton = $('#back');
 const autoScrollButton = $('#auto-scroll');
 const autoScrollInfo = $('#auto-scroll-info');
+const previewPanel = $('#preview-panel');
 const noteHeading = $('#note-title');
 const breadcrumbs = $('#breadcrumbs');
 const pageInfo = $('#page-info');
@@ -307,6 +310,8 @@ function sliceByBytes(text, cuts) {
 }
 
 function renderPreview() {
+  // Collapsed: nothing to draw until it is opened again.
+  if (!previewPanel.open) return;
   const doc = controller.current;
   const page = controller.page;
   const { links } = doc.rendered;
@@ -487,6 +492,8 @@ async function initialize() {
   await controller.applySettings(settings);
 
   currentFolder = (await gm.storage.get(FOLDER_KEY).catch(() => null))?.value ?? '';
+  const ui = (await gm.storage.get(UI_KEY).catch(() => null))?.value;
+  if (ui && typeof ui.previewOpen === 'boolean') previewPanel.open = ui.previewOpen;
   try {
     await reloadVault();
   } catch (error) {
@@ -517,6 +524,15 @@ $('#log-clear').addEventListener('click', () => {
   logLines.textContent = '';
 });
 autoScrollButton.addEventListener('click', () => void controller.setAutoScroll(!controller.autoScroll));
+$('#recentre').addEventListener('click', async () => {
+  await controller.recentre(RECENTRE_DELAY_MS);
+  setStatus(`Look where you read: the glasses recentre in ${RECENTRE_DELAY_MS / 1000} s.`);
+  log('phone', 'sent recentre');
+});
+previewPanel.addEventListener('toggle', () => {
+  if (previewPanel.open && controller?.current) renderPreview();
+  void gm?.storage.set(UI_KEY, { previewOpen: previewPanel.open }).catch(() => undefined);
+});
 bridgeState.addEventListener('click', () => {
   if (!controller) globalThis.location.reload();
 });
