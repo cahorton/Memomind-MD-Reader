@@ -19,7 +19,9 @@ export const defaultSettings = Object.freeze({
   headEnabled: true,
   pitchThreshold: 12,
   dwellMs: 300,
-  repeatMs: 0,
+  // Off: one page per look. On: keep paging every pauseMs while held.
+  continuous: false,
+  pauseMs: 4000,
   turnThreshold: 120,
   invertPitch: false,
   invertYaw: false,

@@ -9,9 +9,9 @@ can be followed and retraced.
 
 | Input | Action |
 | --- | --- |
-| Look **up** past the threshold | Next page (scrolls down) |
-| Look **down** past the threshold | Previous page |
-| Keep holding the tilt | Pages again every *repeat* interval |
+| Look **down** past the threshold | Next page (scrolls down) |
+| Look **up** past the threshold | Previous page (scrolls up) |
+| Keep looking down/up (continuous mode) | Keeps paging, one page per *pause* |
 | Turn head **right** / **left** (a quick flick) | Highlight the next / previous link on the page |
 | **Double-click** | Open the highlighted link |
 | **Long press** | Back to the previous note (with nothing to go back to: 3 s exit countdown, release to cancel) |
@@ -24,19 +24,27 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
 
 - **Tilt to page** (default 12°): pitch, measured from your neutral pose.
   There is 3° of hysteresis, so a tilt hovering near the line does not flicker.
-- **Hold before paging** (default 0.3 s): a quick glance up does not turn the page.
-- **Repeat while held** (default **Off**): with repeat off, each tilt turns
-  exactly one page; look back, then tilt again for the next. Turn it on to keep
-  paging while you hold the tilt.
+- **Hold before paging** (default 0.3 s): a quick glance does not turn the page.
+- **Keep scrolling while I look up/down** (continuous mode, default off): off,
+  each look turns exactly one page; look back, then again for the next. On,
+  holding the look keeps paging, one page per **Pause between pages**
+  (1–10 s, default 4 s), so you can read each page while you hold.
+- **Scroll arrow:** after every page turn a skinny chevron shows which way it
+  went: pointing down below the text, or pointing up above it. It is bright
+  for 2 s, then stays dim until the next turn, so you can still tell after
+  looking away.
 - **Neutral follows you.** It is first taken when head control starts (and on
   each single click), but it does not stay fixed:
   - when you come back from a page turn, wherever your head settles becomes
     the new neutral, so the return swing never pages the other way;
   - outside a tilt, neutral slowly follows posture changes (over ~5 s);
-  - a tilt held for 2.5 s past its page turn (10 s with repeat on) is taken as
-    your new reading pose. This fixes a start taken while looking down at the
-    phone: you get at most one stray page, not endless paging. If you go back
-    to the old pose within a few seconds, it is restored without paging.
+  - a tilt held for 2.5 s past its page turn is taken as your new reading
+    pose. This fixes a start taken while looking down at the phone: you get at
+    most one stray page, not endless paging. If you go back to the old pose
+    within a few seconds, it is restored without paging. Continuous mode keeps
+    this only until neutral is confirmed: by a single click, by coming back
+    from any page turn, or by such a re-centre. After that, a held look
+    scrolls for as long as you hold it.
 - When a phone slider change reaches the glasses, they show
   **Head settings updated**.
 - **Turn needed for links** (default 120, raw gyro units): a flick must exceed

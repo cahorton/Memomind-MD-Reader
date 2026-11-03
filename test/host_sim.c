@@ -249,8 +249,14 @@ static void dump(void)
            r->current_page, r->page_count, r->doc_complete, r->page_link_count, r->selected);
     printf(",\"linesPerPage\":%u,\"tiltZone\":%d,\"headEnabled\":%u,\"exitActive\":%u,\"exited\":%d",
            r->lines_per_page, r->tilt_zone, r->head_enabled, r->exit_active, exited);
-    printf(",\"guideHidden\":%d,\"underlines\":[",
-           r->guide_marker ? r->guide_marker->hidden : 1);
+    printf(",\"guideHidden\":%d", r->guide_marker ? r->guide_marker->hidden : 1);
+    /* arrow: 1 below the text pointing down, -1 above pointing up, 0 none. */
+    printf(",\"arrow\":%d,\"arrowBright\":%d,\"arrowTipY\":%d,\"viewportTop\":%d,\"viewportBottom\":%d",
+           r->scroll_arrow && !r->scroll_arrow->hidden ? r->arrow_shown : 0,
+           r->arrow_elapsed != 0U,
+           r->scroll_arrow && r->scroll_arrow->point_count == 3 ? (int)r->scroll_arrow->points[1].y : -1,
+           r->viewport_y, r->viewport_y + r->viewport_height);
+    printf(",\"underlines\":[");
     for (unsigned i = 0; i < MAX_UNDERLINES; ++i) {
         gm_plugin_lvgl_obj_t *line = r->underline[i];
         if (line == 0 || line->hidden || line->point_count < 2) continue;

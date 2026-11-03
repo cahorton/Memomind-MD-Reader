@@ -75,7 +75,6 @@
 #define SETTLE_MS 600U
 #define SETTLE_TAU_MS 150U
 #define HOLD_RECENTRE_MS 2500U
-#define REPEAT_HOLD_RECENTRE_MS 10000U
 #define RETURN_WINDOW_MS 6000U
 #define YAW_CONFIRM_SAMPLES 2U
 #define YAW_MIN_LOCK_MS 350U
@@ -89,7 +88,10 @@
 #define TOP_MARGIN 6
 #define BOTTOM_MARGIN 4
 #define LINE_SPACE 5
-#define HEADER_GAP 4
+#define HEADER_GAP 10
+#define ARROW_HALF_WIDTH 32
+#define ARROW_HEIGHT 5
+#define ARROW_BRIGHT_MS 2000U
 #define GUIDE_WIDTH 14
 
 #define COLOR_TEXT 0xFFU
@@ -120,9 +122,14 @@ typedef struct {
     gm_plugin_lvgl_obj_t *guide_track;
     gm_plugin_lvgl_obj_t *guide_tick[2];
     gm_plugin_lvgl_obj_t *guide_marker;
+    gm_plugin_lvgl_obj_t *scroll_arrow;
     gm_plugin_lvgl_point_t underline_points[MAX_UNDERLINES][2];
     gm_plugin_lvgl_point_t track_points[2];
     gm_plugin_lvgl_point_t tick_points[2][2];
+    gm_plugin_lvgl_point_t arrow_points[3];
+    int8_t arrow_pending;
+    int8_t arrow_shown;
+    uint32_t arrow_elapsed;
 
     /* Current text window, NUL-terminated for the font measurement calls. */
     char window[WINDOW_BYTES + 1U];
@@ -192,6 +199,11 @@ typedef struct {
     uint32_t return_window;
     uint8_t settling;
     uint32_t settle_elapsed;
+    /* Set once the user has shown where neutral is (a tap, a return from a
+     * page turn, or a re-centre). Until then a long hold re-centres even in
+     * continuous mode, so a start taken while looking at the phone heals. */
+    uint8_t neutral_confirmed;
+    uint8_t confirm_on_calibration;
     int8_t tilt_zone;
     uint8_t tilt_fired;
     uint32_t zone_elapsed;
@@ -428,6 +440,8 @@ static void update_footer(md_reader_t *self)
     self->ui->label_set_text(self->footer_label, text);
 }
 
+static void show_arrow(md_reader_t *self, int8_t direction);
+
 static void show_message(md_reader_t *self, const char *text)
 {
     self->displayed = 0U;
@@ -442,6 +456,7 @@ static void show_message(md_reader_t *self, const char *text)
     }
     for (uint16_t index = 0U; index < MAX_UNDERLINES; ++index)
         set_hidden(self, self->underline[index], true);
+    show_arrow(self, 0);
     update_footer(self);
     update_hint(self);
 }
@@ -719,6 +734,43 @@ static void collect_page_links(md_reader_t *self)
     }
 }
 
+/* A skinny chevron above the text (scrolled up) or below it (scrolled down),
+ * bright for a moment, then dim until the next page turn. */
+static void show_arrow(md_reader_t *self, int8_t direction)
+{
+    int16_t centre = (int16_t)(self->display_width / 2);
+    int16_t top;
+    int16_t tip;
+    int16_t base;
+    self->arrow_shown = direction;
+    if (self->scroll_arrow == 0) return;
+    if (direction == 0) {
+        set_hidden(self, self->scroll_arrow, true);
+        return;
+    }
+    if (direction > 0) {
+        top = (int16_t)(self->viewport_y + self->viewport_height +
+                        (HEADER_GAP - ARROW_HEIGHT) / 2);
+        base = top;
+        tip = (int16_t)(top + ARROW_HEIGHT);
+    } else {
+        top = (int16_t)(self->viewport_y - HEADER_GAP + (HEADER_GAP - ARROW_HEIGHT) / 2);
+        base = (int16_t)(top + ARROW_HEIGHT);
+        tip = top;
+    }
+    self->arrow_points[0].x = centre - ARROW_HALF_WIDTH;
+    self->arrow_points[0].y = base;
+    self->arrow_points[1].x = centre;
+    self->arrow_points[1].y = tip;
+    self->arrow_points[2].x = centre + ARROW_HALF_WIDTH;
+    self->arrow_points[2].y = base;
+    self->ui->line_set_points(self->scroll_arrow, self->arrow_points, 3U);
+    self->ui->style_set(self->scroll_arrow, GM_PLUGIN_LVGL_STYLE_LINE_COLOR,
+                        color(COLOR_TEXT), GM_PLUGIN_LVGL_SELECTOR_MAIN);
+    self->arrow_elapsed = ARROW_BRIGHT_MS;
+    set_hidden(self, self->scroll_arrow, false);
+}
+
 /* Requires build_page(index) to have returned BUILD_OK. */
 static void render_page(md_reader_t *self, uint16_t index, uint16_t select_id)
 {
@@ -735,6 +787,9 @@ static void render_page(md_reader_t *self, uint16_t index, uint16_t select_id)
     }
     layout_underlines(self);
     apply_selection(self);
+    /* Only a page turn gets an arrow; opening or jumping clears it. */
+    show_arrow(self, self->arrow_pending);
+    self->arrow_pending = 0;
     update_footer(self);
     update_hint(self);
     send_page(self);
@@ -791,6 +846,7 @@ static void seek(md_reader_t *self, uint32_t offset, uint16_t select_id)
     self->seek_offset = offset;
     self->seek_link = select_id;
     self->pending = PENDING_SEEK;
+    self->arrow_pending = 0;
     continue_seek(self);
 }
 
@@ -801,6 +857,7 @@ static void next_page(md_reader_t *self)
         show_notice(self, "End of note");
         return;
     }
+    self->arrow_pending = 1;
     show_page(self, (uint16_t)(self->current_page + 1U), NO_LINK);
 }
 
@@ -811,6 +868,7 @@ static void previous_page(md_reader_t *self)
         show_notice(self, "Top of note");
         return;
     }
+    self->arrow_pending = -1;
     show_page(self, (uint16_t)(self->current_page - 1U), NO_LINK);
 }
 
@@ -900,6 +958,7 @@ static void reset_head_state(md_reader_t *self)
     self->repeat_elapsed = 0U;
     self->settling = 0U;
     self->settle_elapsed = 0U;
+    self->neutral_confirmed = 0U;
     self->return_window = 0U;
     self->recentred_zone = 0;
     self->yaw_locked = 0U;
@@ -973,24 +1032,28 @@ static void leave_zone(md_reader_t *self, bool settle)
     self->repeat_elapsed = 0U;
     self->settling = settle ? 1U : 0U;
     self->settle_elapsed = 0U;
+    /* Every settle captures a pose the user chose to hold. */
+    if (settle) self->neutral_confirmed = 1U;
 }
 
 static void turn_page(md_reader_t *self, int8_t zone)
 {
-    /* Looking up reads further down the note; looking down goes back. */
-    if (zone > 0) next_page(self);
+    /* Looking down reads further down the note; looking up goes back. */
+    if (zone < 0) next_page(self);
     else previous_page(self);
 }
 
 /*
- * Pitch paging. A tilt past the threshold, held for the dwell, turns one page
- * (more only if repeat is on). The neutral pose is not fixed:
+ * Pitch paging. A tilt past the threshold, held for the dwell, turns one page;
+ * in continuous mode (repeat_ms != 0) it keeps turning a page every repeat_ms
+ * while held. Looking down pages down. The neutral pose is not fixed:
  *  - coming back from a page turn, wherever the head settles is the new
  *    neutral, so the return swing never pages the other way;
  *  - outside a tilt, neutral slowly follows posture changes;
  *  - a tilt held well past its page turn is taken as the new reading pose
  *    (this heals a calibration taken while looking down at the phone), and
  *    a quick return to the old pose soon after restores it without paging.
+ *    Continuous mode skips this once neutral is confirmed.
  */
 static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
 {
@@ -1040,7 +1103,10 @@ static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
         turn_page(self, self->tilt_zone);
         return;
     }
-    hold_limit = self->repeat_ms != 0U ? REPEAT_HOLD_RECENTRE_MS : HOLD_RECENTRE_MS;
+    /* Continuous mode keeps paging for as long as the tilt is held, once
+     * neutral is known to be right. */
+    hold_limit = self->repeat_ms != 0U && self->neutral_confirmed != 0U
+        ? UINT32_MAX : HOLD_RECENTRE_MS;
     if (self->zone_elapsed >= hold_limit) {
         self->previous_neutral_fp = self->neutral_fp;
         self->recentred_zone = self->tilt_zone;
@@ -1115,6 +1181,8 @@ static void update_head(md_reader_t *self, uint32_t elapsed_ms)
             self->neutral_fp = self->calibration_sum * PITCH_SCALE /
                 (int32_t)CALIBRATION_SAMPLES;
             self->previous_neutral_fp = self->neutral_fp;
+            self->neutral_confirmed = self->confirm_on_calibration;
+            self->confirm_on_calibration = 0U;
             self->guide_zone = 2;
             update_guide_visibility(self);
         }
@@ -1292,6 +1360,8 @@ static void toggle_head(md_reader_t *self)
     }
     self->head_enabled = self->head_enabled == 0U ? 1U : 0U;
     set_imu(self, self->head_enabled != 0U);
+    /* Tapping to resume is a deliberate "this is neutral". */
+    self->confirm_on_calibration = self->head_enabled;
     show_notice(self, self->head_enabled != 0U ? "Head scroll on, recentred"
                                                : "Head scroll paused");
 }
@@ -1462,11 +1532,13 @@ static gm_plugin_result_t create_ui(md_reader_t *self)
     self->guide_tick[0] = create_line(self, self->root, COLOR_FAINT, 1);
     self->guide_tick[1] = create_line(self, self->root, COLOR_FAINT, 1);
     self->guide_marker = self->ui->obj_create(self->root);
+    self->scroll_arrow = create_line(self, self->root, COLOR_TEXT, 2);
     self->exit_label = create_label(self, COLOR_TEXT, GM_PLUGIN_LVGL_LABEL_CLIP);
     self->exit_arc = self->ui->arc_create(self->root);
     if (self->hint_label == 0 || self->footer_label == 0 ||
         self->guide_track == 0 || self->guide_tick[0] == 0 ||
         self->guide_tick[1] == 0 || self->guide_marker == 0 ||
+        self->scroll_arrow == 0 ||
         self->exit_label == 0 || self->exit_arc == 0)
         return GM_PLUGIN_ENOMEM;
     self->ui->style_set(self->footer_label, GM_PLUGIN_LVGL_STYLE_TEXT_ALIGN,
@@ -1531,6 +1603,10 @@ static gm_plugin_result_t on_start(void *opaque)
     self->back_sent = 0U;
     self->notice_elapsed = 0U;
     self->imu_running = 0U;
+    self->arrow_pending = 0;
+    self->arrow_shown = 0;
+    self->arrow_elapsed = 0U;
+    self->confirm_on_calibration = 0U;
     wipe_private_data(self);
     result = create_ui(self);
     if (result != GM_PLUGIN_OK) {
@@ -1553,6 +1629,19 @@ static void on_loop(void *opaque, uint32_t elapsed_ms)
             update_hint(self);
         } else {
             self->notice_elapsed -= elapsed_ms;
+        }
+    }
+    if (self->arrow_elapsed != 0U) {
+        if (elapsed_ms >= self->arrow_elapsed) {
+            /* Keep a dim arrow so a glance back still shows the last turn. */
+            self->arrow_elapsed = 0U;
+            if (self->arrow_shown != 0)
+                self->ui->style_set(self->scroll_arrow,
+                                    GM_PLUGIN_LVGL_STYLE_LINE_COLOR,
+                                    color(COLOR_FAINT),
+                                    GM_PLUGIN_LVGL_SELECTOR_MAIN);
+        } else {
+            self->arrow_elapsed -= elapsed_ms;
         }
     }
     if (self->exit_active != 0U) {
@@ -1607,6 +1696,7 @@ static void on_stop(void *opaque)
     self->guide_track = 0;
     self->guide_tick[0] = self->guide_tick[1] = 0;
     self->guide_marker = 0;
+    self->scroll_arrow = 0;
     for (uint16_t index = 0U; index < MAX_UNDERLINES; ++index)
         self->underline[index] = 0;
 }

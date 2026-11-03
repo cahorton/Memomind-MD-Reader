@@ -37,7 +37,7 @@
       <section class="reader">
         <div id="empty-state" class="empty-state">
           <h2>Pick a note to read on your glasses</h2>
-          <p>Look up to page down, look down to page up. Turn your head left or right to pick a link, double-click to open it, long-press to go back.</p>
+          <p>Look down to page down, look up to page up. Turn your head left or right to pick a link, double-click to open it, long-press to go back.</p>
         </div>
 
         <div id="reader" hidden>
@@ -63,8 +63,9 @@
             <label>Hold before paging <output id="dwell-value"></output>
               <input id="dwell" type="range" min="0" max="1000" step="50">
             </label>
-            <label>Repeat while held <output id="repeat-value"></output>
-              <input id="repeat" type="range" min="0" max="4000" step="500">
+            <label class="toggle"><input id="continuous" type="checkbox"> Keep scrolling while I look up/down</label>
+            <label id="pause-setting">Pause between pages <output id="pause-value"></output>
+              <input id="pause" type="range" min="1000" max="10000" step="500">
             </label>
             <label>Turn needed for links <output id="turn-value"></output>
               <input id="turn" type="range" min="40" max="400" step="10">

@@ -5,8 +5,8 @@ import { Vault } from './vault.js';
 import { dirname, noteTitle } from './vault-links.js';
 
 const SETTINGS_KEY = 'md-reader.settings.v1';
-// Version 2 turned repeat-while-held off by default; older saves drop it.
-const SETTINGS_VERSION = 2;
+// Version 3 replaced repeatMs with continuous + pauseMs.
+const SETTINGS_VERSION = 3;
 const STATE_KEY = 'md-reader.state.v1';
 const STATE_SAVE_DELAY_MS = 800;
 
@@ -32,7 +32,8 @@ const settingInputs = {
   tiltGuide: $('#tilt-guide'),
   pitchThreshold: $('#pitch-threshold'),
   dwellMs: $('#dwell'),
-  repeatMs: $('#repeat'),
+  continuous: $('#continuous'),
+  pauseMs: $('#pause'),
   turnThreshold: $('#turn'),
   invertPitch: $('#invert-pitch'),
   invertYaw: $('#invert-yaw'),
@@ -41,7 +42,7 @@ const settingInputs = {
 const settingOutputs = {
   pitchThreshold: [$('#pitch-threshold-value'), (value) => `${value}°`],
   dwellMs: [$('#dwell-value'), (value) => `${(value / 1000).toFixed(2)} s`],
-  repeatMs: [$('#repeat-value'), (value) => (value === 0 ? 'Off' : `${(value / 1000).toFixed(1)} s`)],
+  pauseMs: [$('#pause-value'), (value) => `${(value / 1000).toFixed(1)} s`],
   turnThreshold: [$('#turn-value'), (value) => (value < 100 ? 'light' : value < 200 ? 'medium' : 'firm') + ` (${value})`],
 };
 
@@ -261,6 +262,7 @@ function showSettings(settings) {
   for (const [name, [output, format]] of Object.entries(settingOutputs)) {
     output.textContent = format(Number(settings[name]));
   }
+  $('#pause-setting').hidden = !settings.continuous;
 }
 
 function readSettings() {
@@ -334,7 +336,7 @@ async function initialize() {
   setConnection(connected ? 'Glasses connected' : 'Bridge ready', connected);
 
   const savedSettings = { ...((await gm.storage.get(SETTINGS_KEY).catch(() => null))?.value ?? {}) };
-  if (savedSettings.settingsVersion !== SETTINGS_VERSION) delete savedSettings.repeatMs;
+  delete savedSettings.repeatMs;
   const settings = { ...defaultSettings, ...savedSettings };
   showSettings(settings);
   await controller.applySettings(settings);

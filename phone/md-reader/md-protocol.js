@@ -70,9 +70,9 @@ export function encodeSettings(settings) {
   if (settings.tiltGuide) flags |= settingFlags.tiltGuide;
   data[2] = settings.headEnabled ? 1 : 0;
   data[3] = Math.max(3, Math.min(45, Math.round(settings.pitchThreshold)));
-  // 0 turns repeat off: one page per tilt.
-  const repeatMs = Math.round(settings.repeatMs);
-  view.setUint16(4, repeatMs <= 0 ? 0 : Math.max(500, Math.min(5000, repeatMs)));
+  // The repeat interval is the continuous-mode pause; 0 means one page per look.
+  const repeatMs = settings.continuous ? Math.round(settings.pauseMs) : 0;
+  view.setUint16(4, repeatMs <= 0 ? 0 : Math.max(500, Math.min(10000, repeatMs)));
   view.setUint16(6, Math.max(0, Math.min(2000, Math.round(settings.dwellMs))));
   view.setUint16(8, Math.max(20, Math.min(2000, Math.round(settings.turnThreshold))));
   data[10] = flags;

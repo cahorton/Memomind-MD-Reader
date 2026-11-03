@@ -204,35 +204,45 @@ test('head tilt pages through a long note one window at a time', async () => {
     await run('TICK 2000');
     assert.equal((await state()).pageIndex, 0);
 
-    // A quick glance up shorter than the dwell does not page.
-    await run('IMU 20 0 0 0');
+    // A quick glance down shorter than the dwell does not page.
+    await run('IMU -20 0 0 0');
     await run('TICK 200');
     await run('IMU 0 0 0 0');
     await run('TICK 200');
     assert.equal((await state()).pageIndex, 0);
 
-    // With repeat turned on, holding the look-up pages once after the dwell,
-    // then every repeat.
-    await controller.applySettings({ repeatMs: 1500 });
-    await run('IMU 20 0 0 0');
-    await run('TICK 400');
-    assert.equal((await state()).pageIndex, 1);
-    await run('TICK 1500');
-    view = await state();
-    assert.equal(view.pageIndex, 2);
-    assert.equal(view.page, phonePage(controller));
-    assert.equal(view.tiltZone, 1);
-
-    // Back to centre, then looking down pages back.
-    await run('IMU 0 0 0 0');
-    await run('TICK 1000');
+    // Continuous mode: holding a look down pages once after the dwell, then
+    // after every pause. The arrow below the text points down.
+    await controller.applySettings({ continuous: true, pauseMs: 1500 });
     await run('IMU -20 0 0 0');
     await run('TICK 400');
     view = await state();
     assert.equal(view.pageIndex, 1);
+    assert.equal(view.arrow, 1);
+    assert.equal(view.arrowBright, 1);
+    assert.ok(view.arrowTipY > view.viewportBottom, 'down arrow sits below the text');
+    await run('TICK 1500');
+    view = await state();
+    assert.equal(view.pageIndex, 2);
     assert.equal(view.page, phonePage(controller));
+    assert.equal(view.tiltZone, -1);
+
+    // Back to centre, then looking up pages back with an up arrow on top.
     await run('IMU 0 0 0 0');
-    await run('TICK 200');
+    await run('TICK 1000');
+    await run('IMU 20 0 0 0');
+    await run('TICK 400');
+    view = await state();
+    assert.equal(view.pageIndex, 1);
+    assert.equal(view.page, phonePage(controller));
+    assert.equal(view.arrow, -1);
+    assert.ok(view.arrowTipY < view.viewportTop, 'up arrow sits above the text');
+    await run('IMU 0 0 0 0');
+    await run('TICK 2500');
+    // The arrow dims but stays until the next page turn.
+    view = await state();
+    assert.equal(view.arrow, -1);
+    assert.equal(view.arrowBright, 0);
 
     // Walk to the end with the ring: every page matches the phone text, and
     // pages tile the document with only blank lines between them.
@@ -326,7 +336,7 @@ test('single click pauses head control; long press with no history exits', async
     view = await state();
     assert.equal(view.headEnabled, 1);
     assert.equal(view.pageIndex, 0);
-    await run('IMU 45 0 0 0');
+    await run('IMU 5 0 0 0');
     await run('TICK 400');
     assert.equal((await state()).pageIndex, 1);
 
@@ -347,15 +357,19 @@ test('calibrating while looking down at the phone settles instead of paging fore
   try {
     await controller.open('Long.md');
     // Looking straight ahead to read is 35 degrees "up" from that neutral.
+    // Start a few pages in so a stray page back would show.
+    await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
+    await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
+    await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
     await run('IMU 0 0 0 0');
     await run('TICK 15000');
     let view = await state();
-    assert.ok(view.pageIndex <= 1, `paged ${view.pageIndex} times while reading straight ahead`);
+    assert.ok(view.pageIndex >= 2, `paged back ${3 - view.pageIndex} times while reading straight ahead`);
     assert.equal(view.tiltZone, 0);
     const settled = view.pageIndex;
 
-    // Straight ahead is now neutral: a real look up pages once.
-    await run('IMU 20 0 0 0');
+    // Straight ahead is now neutral: a real look down pages once.
+    await run('IMU -20 0 0 0');
     await run('TICK 600');
     assert.equal((await state()).pageIndex, settled + 1);
     await run('IMU 0 0 0 0');
@@ -370,20 +384,20 @@ test('by default a held tilt turns one page, and coming back does not page back'
   const { sim, controller, run, state } = await harness();
   try {
     await controller.open('Long.md');
-    await run('IMU 20 0 0 0');
+    await run('IMU -20 0 0 0');
     await run('TICK 5000');
     assert.equal((await state()).pageIndex, 1);
     await run('IMU 0 0 0 0');
     await run('TICK 2000');
     assert.equal((await state()).pageIndex, 1);
-    // Next look up turns the next page.
-    await run('IMU 20 0 0 0');
+    // Next look down turns the next page.
+    await run('IMU -20 0 0 0');
     await run('TICK 600');
     await run('IMU 0 0 0 0');
     await run('TICK 1500');
     assert.equal((await state()).pageIndex, 2);
-    // And looking down goes back one.
-    await run('IMU -20 0 0 0');
+    // And looking up goes back one.
+    await run('IMU 20 0 0 0');
     await run('TICK 600');
     await run('IMU 0 0 0 0');
     await run('TICK 1500');
@@ -402,10 +416,37 @@ test('phone settings reach the glasses and say so', async () => {
     let view = await state();
     assert.equal(view.hint, 'Head settings updated');
     // 20 degrees is now below the threshold.
-    await run('IMU 20 0 0 0');
+    await run('IMU -20 0 0 0');
     await run('TICK 3000');
     view = await state();
     assert.equal(view.pageIndex, 0);
+  } finally {
+    sim.close();
+  }
+});
+
+test('continuous mode keeps scrolling while the look is held, up to a 10 s pause', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    await controller.applySettings({ continuous: true, pauseMs: 10000 });
+    // Confirm neutral the way a reader does: one look down and back.
+    await run('IMU -20 0 0 0');
+    await run('TICK 400');
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    assert.equal((await state()).pageIndex, 1);
+
+    // Hold the look down for a minute: a page right away, then one per 10 s.
+    await run('IMU -20 0 0 0');
+    await run('TICK 400');
+    assert.equal((await state()).pageIndex, 2);
+    await run('TICK 9500');
+    assert.equal((await state()).pageIndex, 2);
+    await run('TICK 600');
+    assert.equal((await state()).pageIndex, 3);
+    await run('TICK 50000');
+    assert.equal((await state()).pageIndex, 8);
   } finally {
     sim.close();
   }
