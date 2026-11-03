@@ -31,7 +31,7 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 14U
+#define GLASSES_VERSION 15U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
@@ -134,6 +134,7 @@
 #define GUIDE_WIDTH 14
 /* The tilt guide's track spans +/- this many degrees from neutral. */
 #define GUIDE_RANGE_DEG 40
+#define GUIDE_MARKER_HALF 4
 
 #define COLOR_TEXT 0xFFU
 #define COLOR_DIM 0xDBU
@@ -581,8 +582,11 @@ static int32_t guide_offset(const md_reader_t *self, int32_t degrees)
     return offset;
 }
 
-/* Ticks at +/- the tilt threshold, on the same scale as the marker, so a
- * smaller threshold draws them closer together. */
+/* Ticks for the tilt threshold, on the same scale as the marker, so a
+ * smaller threshold draws them closer together. The marker is an 8 px box
+ * centred on the head's position (rows centre-4 .. centre+3); each tick sits
+ * just past the box's far edge at the threshold, so a page turns exactly when
+ * the whole box has crossed the line. Ticks are 13 px, wider than the box. */
 static void layout_guide_ticks(md_reader_t *self)
 {
     int16_t x = (int16_t)(self->display_width - SIDE_MARGIN - GUIDE_WIDTH / 2);
@@ -590,10 +594,11 @@ static void layout_guide_ticks(md_reader_t *self)
     int16_t reach = (int16_t)guide_offset(self, self->pitch_threshold);
     if (self->guide_tick[0] == 0) return;
     for (uint8_t tick = 0U; tick < 2U; ++tick) {
-        int16_t y = (int16_t)(tick == 0U ? middle - reach : middle + reach);
-        self->tick_points[tick][0].x = (int16_t)(x - 5);
+        int16_t y = (int16_t)(tick == 0U ? middle - reach + GUIDE_MARKER_HALF
+                                         : middle + reach - GUIDE_MARKER_HALF - 1);
+        self->tick_points[tick][0].x = (int16_t)(x - 6);
         self->tick_points[tick][0].y = y;
-        self->tick_points[tick][1].x = (int16_t)(x + 5);
+        self->tick_points[tick][1].x = (int16_t)(x + 6);
         self->tick_points[tick][1].y = y;
         self->ui->line_set_points(self->guide_tick[tick], self->tick_points[tick], 2U);
     }
@@ -660,7 +665,7 @@ static void calculate_layout(md_reader_t *self)
         self->track_points[1].y = (int16_t)(self->viewport_y + self->viewport_height);
         self->ui->line_set_points(self->guide_track, self->track_points, 2U);
         layout_guide_ticks(self);
-        self->ui->obj_set_size(self->guide_marker, 8, 8);
+        self->ui->obj_set_size(self->guide_marker, GUIDE_MARKER_HALF * 2, GUIDE_MARKER_HALF * 2);
         self->guide_y = INT16_MIN;
     }
 }

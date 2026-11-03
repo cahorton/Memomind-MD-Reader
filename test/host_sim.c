@@ -281,6 +281,12 @@ static void dump(void)
            r->guide_tick[1] && r->guide_tick[1]->point_count ? (int)r->guide_tick[1]->points[0].y : -1,
            r->viewport_y + r->viewport_height / 2,
            r->guide_marker ? r->guide_marker->y + 4 : -1);
+    printf(",\"markerTop\":%d,\"markerBottom\":%d,\"markerWidth\":%d,\"tickWidth\":%d",
+           r->guide_marker ? r->guide_marker->y : -1,
+           r->guide_marker ? r->guide_marker->y + r->guide_marker->h - 1 : -1,
+           r->guide_marker ? r->guide_marker->w : -1,
+           r->guide_tick[0] && r->guide_tick[0]->point_count ?
+               (int)(r->guide_tick[0]->points[1].x - r->guide_tick[0]->points[0].x + 1) : -1);
     printf(",\"selectedText\":");
     if (r->selected >= 0 && (uint16_t)r->selected < r->page_link_count) {
         static char selected_text[512];

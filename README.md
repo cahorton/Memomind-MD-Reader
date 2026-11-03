@@ -76,10 +76,11 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
 - Link turns are ignored while a tilt is active, so looking up and to the side
   never does both.
 - An optional **tilt guide** in the right margin shows where your head is
-  relative to the two thresholds (the ticks). The track spans ±40° and the
-  ticks sit at ± your **Tilt to page** angle, so a 6° threshold draws them
-  half as far apart as 12°. The marker brightens when the head is past a
-  threshold.
+  relative to the two thresholds (the ticks). The track spans ±40°; the
+  marker is an 8 px square and the ticks are 13 px lines placed so that a page
+  turns exactly when the whole square has crossed one, so a smaller **Tilt to
+  page** angle draws them closer together. The marker brightens when the head
+  is past a threshold.
 - **Shake head 3× to turn the display off, nod 3× to turn it on** (default
   on). MD Reader reads the gyro itself: five alternating left/right swings,
   each within 0.7 s of the last, turn the display off (the status line counts

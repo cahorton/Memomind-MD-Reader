@@ -536,22 +536,39 @@ test('brightness can be held, at the current level or a fixed one', async () => 
   }
 });
 
-test('tilt guide ticks sit at the threshold: closer together at 6 than at 12 degrees', async () => {
+test('tilt guide ticks: wider than the box, crossed by the whole box exactly at the threshold', async () => {
   const { sim, controller, run, state } = await harness();
   try {
     await controller.open('Long.md');
     let view = await state();
-    const gap12 = view.ticks[1] - view.ticks[0];
-    assert.equal(view.middle - view.ticks[0], view.ticks[1] - view.middle);
+    assert.ok(view.tickWidth > view.markerWidth, `ticks ${view.tickWidth} px, box ${view.markerWidth} px`);
+    assert.equal(view.tickWidth, 13);
+    const reach12 = view.ticks[1] - view.ticks[0];
     await controller.applySettings({ pitchThreshold: 6 });
     view = await state();
-    const gap6 = view.ticks[1] - view.ticks[0];
-    assert.ok(Math.abs(gap6 * 2 - gap12) <= 2, `6 degrees gap ${gap6} should be half of 12 degrees gap ${gap12}`);
-    // The marker reaches a tick exactly when the tilt reaches the threshold.
+    assert.ok(view.ticks[1] - view.ticks[0] < reach12, 'ticks are closer at 6 than at 12 degrees');
+    await run('TICK 2000');
+    // One degree short of looking up 6 degrees: the box still touches the line.
+    await run('IMU 5 0 0 0');
+    await run('TICK 100');
+    view = await state();
+    assert.ok(view.markerBottom >= view.ticks[0], `box ${view.markerTop}-${view.markerBottom}, tick ${view.ticks[0]}`);
+    // At 6 degrees up the whole box is above the upper tick...
     await run('IMU 6 0 0 0');
     await run('TICK 100');
     view = await state();
-    assert.ok(Math.abs(view.marker - view.ticks[0]) <= 1, `marker ${view.marker} vs tick ${view.ticks[0]}`);
+    assert.ok(view.markerBottom < view.ticks[0], `box ${view.markerTop}-${view.markerBottom}, tick ${view.ticks[0]}`);
+    // ...and at 6 degrees down the whole box is below the lower one.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    await run('IMU -5 0 0 0');
+    await run('TICK 100');
+    view = await state();
+    assert.ok(view.markerTop <= view.ticks[1]);
+    await run('IMU -6 0 0 0');
+    await run('TICK 100');
+    view = await state();
+    assert.ok(view.markerTop > view.ticks[1], `box ${view.markerTop}-${view.markerBottom}, tick ${view.ticks[1]}`);
   } finally {
     sim.close();
   }
