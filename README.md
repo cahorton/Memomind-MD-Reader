@@ -65,9 +65,16 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
   half as far apart as 12°. The marker brightens when the head is past a
   threshold.
 - **Shake head 3× to turn the display off, nod 3× to turn it on** (default
-  on) uses the glasses' own nod and shake recognition. While the display is
+  on). MD Reader reads the gyro itself: five alternating left/right swings,
+  each within 0.7 s of the last, turn the display off (the status line counts
+  `Shake 3/5`, `4/5`); five up/down swings turn it on. A swing must be at
+  least as fast as **Turn needed for links**. Three of the glasses' own
+  firmware shake or nod events within 4 s also count. While the display is
   off, the first button press also wakes it and does nothing else, and
   MD Reader always turns the display back on when it closes.
+- **Glasses log** (bottom of the phone plugin): what the glasses report, such
+  as the capabilities they offer, IMU and display call results, settings
+  received, gestures and shake swings. **Copy log** to share it.
 
 On the glasses, links are underlined. The highlighted link is drawn inverted.
 The status line shows the link count or a notice, plus `page / total` (or
@@ -149,10 +156,11 @@ to this folder (or pass `--sdk`). Then:
 
 ## Not yet verified on hardware
 
-- How many firmware `SHAKE`/`NOD` events one head shake or nod produces. If
-  one "no" counts as more than one shake, the display will turn off sooner
-  than expected; the count (3 within 4 s) is in `GESTURE_COUNT` /
-  `GESTURE_WINDOW_MS` in `md_reader.c`.
+- Shake-to-sleep did nothing on the first hardware try (v0.6.0, firmware
+  events only). v0.7.0 adds gyro detection and the Glasses log to find out
+  whether the firmware sends shake events and whether `screen_turn_on`
+  works. Swing counts and gaps are `SHAKE_SWINGS` / `NOD_SWINGS` /
+  `SWING_GAP_MS` in `md_reader.c`.
 
 - The IMU axis signs are inferred from the SDK's `imu` example: pitch rises when
   you look up, and `gyro_x - gyro_y` is negative when you turn left. If either

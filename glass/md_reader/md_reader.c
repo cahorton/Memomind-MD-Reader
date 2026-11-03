@@ -28,6 +28,10 @@
 #define EVENT_BACK 4U
 #define EVENT_HELLO 5U
 #define EVENT_AUTOSCROLL 6U
+#define EVENT_DIAG 7U
+
+#define GLASSES_VERSION 6U
+#define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
 #define WINDOW_HEADER_BYTES 13U
@@ -71,6 +75,12 @@
 /* Shake "no" this many times to turn the display off, nod to turn it on. */
 #define GESTURE_COUNT 3U
 #define GESTURE_WINDOW_MS 4000U
+/* The same, measured from raw gyro swings: a "no" three times is about six
+ * alternating left/right swings, a triple nod six up/down ones. Five are
+ * enough, each within SWING_GAP_MS of the last. */
+#define SHAKE_SWINGS 5U
+#define NOD_SWINGS 5U
+#define SWING_GAP_MS 700U
 
 #define DEFAULT_PITCH_THRESHOLD 12U
 #define DEFAULT_REPEAT_MS 0U
@@ -221,6 +231,12 @@ typedef struct {
     uint8_t nod_count;
     uint32_t shake_first_ms;
     uint32_t nod_first_ms;
+    int8_t shake_sign;
+    uint8_t shake_swings;
+    uint32_t shake_gap;
+    int8_t nod_sign;
+    uint8_t nod_swings;
+    uint32_t nod_gap;
     uint32_t imu_elapsed;
     uint8_t calibration_count;
     int32_t calibration_sum;
@@ -347,6 +363,23 @@ static void send_hello(md_reader_t *self)
     data[1] = EVENT_HELLO;
     write_u32(data + 2, self->session);
     (void)self->host->bt_send(MD_EVENT_CHANNEL, data, sizeof(data));
+}
+
+/* One line for the phone plugin's Glasses log (and the Host log). */
+static void diag(md_reader_t *self, const char *format, ...)
+{
+    uint8_t data[2U + DIAG_BYTES];
+    va_list arguments;
+    int length;
+    va_start(arguments, format);
+    length = self->libc->vsnprintf((char *)data + 2, DIAG_BYTES, format, arguments);
+    va_end(arguments);
+    if (length < 0) return;
+    if (length >= (int)DIAG_BYTES) length = (int)DIAG_BYTES - 1;
+    if (self->host->log != 0) self->host->log("md_reader: %s", (char *)data + 2);
+    data[0] = PROTOCOL_VERSION;
+    data[1] = EVENT_DIAG;
+    (void)self->host->bt_send(MD_EVENT_CHANNEL, data, (uint32_t)(2 + length));
 }
 
 static void send_autoscroll_state(md_reader_t *self)
@@ -1053,15 +1086,20 @@ static void set_imu(md_reader_t *self, bool active)
 {
     gm_plugin_imu_modes_t wanted = GM_PLUGIN_IMU_ENABLE_NONE;
     if (self->imu_available == 0U && self->gestures_available == 0U) return;
-    if (active && self->imu_available != 0U && self->head_enabled != 0U &&
-        self->screen_off == 0U)
+    /* Raw samples drive head control and the shake/nod detector. */
+    if (active && self->imu_available != 0U &&
+        ((self->head_enabled != 0U && self->screen_off == 0U) ||
+         (self->flags & FLAG_GESTURE_SLEEP) != 0U))
         wanted |= GM_PLUGIN_IMU_ENABLE_RAW;
     if (self->gestures_available != 0U &&
         (self->flags & FLAG_GESTURE_SLEEP) != 0U &&
         (active || self->screen_off != 0U))
         wanted |= GM_PLUGIN_IMU_ENABLE_GESTURES;
-    if (wanted != self->imu_modes && self->host->imu_enable(wanted) == GM_PLUGIN_OK)
-        self->imu_modes = wanted;
+    if (wanted != self->imu_modes) {
+        gm_plugin_result_t result = self->host->imu_enable(wanted);
+        diag(self, "imu_enable(%u) -> %d", (unsigned int)wanted, (int)result);
+        if (result == GM_PLUGIN_OK) self->imu_modes = wanted;
+    }
     self->imu_running = (self->imu_modes & GM_PLUGIN_IMU_ENABLE_RAW) != 0U ? 1U : 0U;
     reset_head_state(self);
     update_guide_visibility(self);
@@ -1236,19 +1274,84 @@ static void update_yaw(md_reader_t *self, const gm_plugin_imu_sample_t *sample,
     }
 }
 
+static void set_screen(md_reader_t *self, bool on);
+
+/* Counts direction reversals of a gyro rate past `threshold`; true when a
+ * new swing was counted. A pause longer than SWING_GAP_MS starts over. */
+static bool count_swing(int8_t *sign, uint8_t *swings, uint32_t *gap,
+                        int32_t rate, int32_t threshold, uint32_t dt)
+{
+    int8_t now;
+    *gap += dt;
+    if (*swings != 0U && *gap > SWING_GAP_MS) {
+        *swings = 0U;
+        *sign = 0;
+    }
+    if (rate < threshold && rate > -threshold) return false;
+    now = rate > 0 ? 1 : -1;
+    if (now == *sign) return false;
+    *sign = now;
+    *gap = 0U;
+    if (*swings < UINT8_MAX) ++*swings;
+    return true;
+}
+
+static void update_sleep_gestures(md_reader_t *self,
+                                  const gm_plugin_imu_sample_t *sample,
+                                  uint32_t dt)
+{
+    int32_t horizontal = (int32_t)sample->gyro_raw[0] - sample->gyro_raw[1];
+    int32_t vertical = sample->gyro_raw[2];
+    int32_t threshold = (int32_t)self->turn_threshold;
+    char text[24];
+    if (self->screen_off == 0U) {
+        if (!count_swing(&self->shake_sign, &self->shake_swings, &self->shake_gap,
+                         horizontal, threshold, dt))
+            return;
+        if (self->shake_swings >= SHAKE_SWINGS) {
+            self->shake_swings = 0U;
+            self->shake_sign = 0;
+            diag(self, "shake detected from gyro");
+            set_screen(self, false);
+        } else if (self->shake_swings >= 2U) {
+            /* A link flick and its return make two swings; show from three. */
+            if (self->shake_swings >= 3U) {
+                self->libc->snprintf(text, sizeof(text), "Shake %u/%u",
+                                     (unsigned int)self->shake_swings,
+                                     (unsigned int)SHAKE_SWINGS);
+                show_notice(self, text);
+            }
+            diag(self, "shake swing %u/%u (rate %ld)", (unsigned int)self->shake_swings,
+                 (unsigned int)SHAKE_SWINGS, (long)horizontal);
+        }
+    } else {
+        if (!count_swing(&self->nod_sign, &self->nod_swings, &self->nod_gap,
+                         vertical, threshold, dt))
+            return;
+        diag(self, "nod swing %u/%u (rate %ld)", (unsigned int)self->nod_swings,
+             (unsigned int)NOD_SWINGS, (long)vertical);
+        if (self->nod_swings >= NOD_SWINGS) {
+            self->nod_swings = 0U;
+            self->nod_sign = 0;
+            diag(self, "nod detected from gyro");
+            set_screen(self, true);
+        }
+    }
+}
+
 static void update_head(md_reader_t *self, uint32_t elapsed_ms)
 {
     gm_plugin_imu_sample_t sample;
     uint32_t dt;
     int16_t pitch;
-    if (self->imu_running == 0U || self->head_enabled == 0U ||
-        self->screen_off != 0U)
-        return;
+    if (self->imu_running == 0U) return;
     self->imu_elapsed += elapsed_ms;
     if (self->imu_elapsed < IMU_SAMPLE_MS) return;
     dt = self->imu_elapsed > 250U ? 250U : self->imu_elapsed;
     self->imu_elapsed = 0U;
     if (self->host->imu_read(&sample) != GM_PLUGIN_OK) return;
+    if ((self->flags & FLAG_GESTURE_SLEEP) != 0U) update_sleep_gestures(self, &sample, dt);
+    if (self->head_enabled == 0U || self->screen_off != 0U) return;
     pitch = sample.pitch_degrees;
     if ((self->flags & FLAG_INVERT_PITCH) != 0U) pitch = (int16_t)-pitch;
     if (self->calibration_count < CALIBRATION_SAMPLES) {
@@ -1281,9 +1384,11 @@ static void apply_brightness(md_reader_t *self)
     const gm_plugin_display_control_api_t *display = &self->host->display_control;
     if (self->display_control_available == 0U) return;
     if (self->brightness_lock != 0U) {
-        if (self->brightness_blocked == 0U &&
-            display->auto_brightness_block(true) == GM_PLUGIN_OK)
-            self->brightness_blocked = 1U;
+        if (self->brightness_blocked == 0U) {
+            gm_plugin_result_t result = display->auto_brightness_block(true);
+            diag(self, "auto_brightness_block(1) -> %d", (int)result);
+            if (result == GM_PLUGIN_OK) self->brightness_blocked = 1U;
+        }
         /* Level 0 keeps whatever brightness the glasses have now. */
         if (self->brightness_blocked != 0U && self->brightness_level >= 1U &&
             self->brightness_level <= 10U)
@@ -1440,6 +1545,9 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
     self->settings_received = 1U;
     self->brightness_lock = received[12] != 0U ? 1U : 0U;
     self->brightness_level = received[13] > 10U ? 10U : received[13];
+    diag(self, "settings: head=%u tilt=%u turn=%u flags=0x%x bright=%u/%u",
+         (unsigned int)data[2], (unsigned int)data[3], (unsigned int)read_u16(data + 8),
+         (unsigned int)data[10], (unsigned int)received[12], (unsigned int)received[13]);
     apply_brightness(self);
     self->head_enabled = data[2] != 0U ? 1U : 0U;
     self->pitch_threshold = data[3] < 3U ? 3U : (data[3] > 45U ? 45U : data[3]);
@@ -1522,15 +1630,30 @@ static void toggle_head(md_reader_t *self)
 
 static void set_screen(md_reader_t *self, bool on)
 {
-    if (self->display_power_available == 0U) return;
+    gm_plugin_result_t result;
+    if (self->display_power_available == 0U) {
+        diag(self, "display power control not available on this host");
+        show_notice(self, "Can't turn the display off");
+        return;
+    }
     if (!on) {
-        if (self->host->display_control.screen_turn_on(false) != GM_PLUGIN_OK) return;
+        result = self->host->display_control.screen_turn_on(false);
+        diag(self, "screen_turn_on(0) -> %d", (int)result);
+        if (result != GM_PLUGIN_OK) {
+            show_notice(self, "Display off failed");
+            return;
+        }
         self->screen_off = 1U;
         self->nod_count = 0U;
+        self->nod_swings = 0U;
+        self->nod_sign = 0;
     } else {
-        (void)self->host->display_control.screen_turn_on(true);
+        result = self->host->display_control.screen_turn_on(true);
+        diag(self, "screen_turn_on(1) -> %d", (int)result);
         self->screen_off = 0U;
         self->shake_count = 0U;
+        self->shake_swings = 0U;
+        self->shake_sign = 0;
         show_notice(self, "Display on");
     }
     /* Raw head tracking pauses while off and recalibrates on waking. */
@@ -1554,6 +1677,8 @@ static bool count_gesture(uint8_t *count, uint32_t *first_ms, uint32_t now_ms)
 static bool handle_gesture(md_reader_t *self, const gm_plugin_event_t *event)
 {
     gm_plugin_imu_gesture_t gesture = event->data.imu_gesture.gesture;
+    diag(self, "firmware gesture %u active=%u", (unsigned int)gesture,
+         (unsigned int)event->data.imu_gesture.active);
     if (!event->data.imu_gesture.active ||
         (self->flags & FLAG_GESTURE_SLEEP) == 0U)
         return true;
@@ -1834,6 +1959,10 @@ static gm_plugin_result_t on_start(void *opaque)
         self->root = 0;
         return result;
     }
+    diag(self, "glasses plugin v%u started: caps=0x%lx raw=%u gestures=%u display=%u",
+         (unsigned int)GLASSES_VERSION, (unsigned long)self->host->capabilities,
+         (unsigned int)self->imu_available, (unsigned int)self->gestures_available,
+         (unsigned int)self->display_power_available);
     set_imu(self, true);
     send_hello(self);
     return GM_PLUGIN_OK;

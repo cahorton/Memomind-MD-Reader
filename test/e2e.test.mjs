@@ -76,7 +76,12 @@ async function harness({ startPitch = 0 } = {}) {
   const sim = new Sim();
   const outbox = [];
   const vault = { paths: Object.keys(notes), readNote: async (path) => notes[path] };
-  const controller = new ReaderController({ vault, send: async (bytes) => { outbox.push(bytes); } });
+  const diagnostics = [];
+  const controller = new ReaderController({
+    vault,
+    send: async (bytes) => { outbox.push(bytes); },
+    onChange: (reason, detail) => { if (reason === 'diag') diagnostics.push(detail); },
+  });
   const rejected = [];
 
   async function feed(output) {
@@ -104,7 +109,7 @@ async function harness({ startPitch = 0 } = {}) {
   // Head tracking calibrates on the pose held at start.
   await run(`IMU ${startPitch} 0 0 0`);
   await run('TICK 400');
-  return { sim, controller, run, state, rejected };
+  return { sim, controller, run, state, rejected, diagnostics };
 }
 
 function selectedText(view) {
@@ -559,15 +564,15 @@ test('three head shakes turn the display off; three nods turn it back on', async
     await run('TICK 2500');
     await run(`GESTURE ${GESTURE.shake}`);
     assert.equal((await state()).screenOn, 1);
-    // Three within a few seconds: off. Raw tracking stops, gestures stay on
-    // (IMU mode bits: 1 gestures, 2 raw).
+    // Three within a few seconds: off. Gestures and raw samples stay on so a
+    // nod can wake it (IMU mode bits: 1 gestures, 2 raw).
     await run('TICK 600');
     await run(`GESTURE ${GESTURE.shake}`);
     await run('TICK 600');
     await run(`GESTURE ${GESTURE.shake}`);
     let view = await state();
     assert.equal(view.screenOn, 0);
-    assert.equal(view.imuMode, 1);
+    assert.equal(view.imuMode, 3);
 
     // While off, tilting and auto-scroll do not page.
     await controller.setAutoScroll(true);
@@ -608,6 +613,68 @@ test('three head shakes turn the display off; three nods turn it back on', async
       await run('TICK 300');
     }
     assert.equal((await state()).screenOn, 1);
+  } finally {
+    sim.close();
+  }
+});
+
+test('head shakes and nods are also read from the gyro, with a log on the phone', async () => {
+  const { sim, controller, run, state, diagnostics } = await harness();
+  try {
+    await controller.open('Long.md');
+    assert.ok(diagnostics.some((line) => /glasses plugin v\d+ started: caps=0x[0-9a-f]+ raw=1 gestures=1 display=1/u.test(line)),
+      diagnostics.join('\n'));
+    assert.ok(diagnostics.some((line) => line.startsWith('settings: head=1 tilt=12')));
+
+    // A link flick and its return is not a shake.
+    await run('IMU 0 200 0 0');
+    await run('TICK 100');
+    await run('IMU 0 -200 0 0');
+    await run('TICK 100');
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    let view = await state();
+    assert.equal(view.screenOn, 1);
+    assert.notEqual(view.hint.slice(0, 5), 'Shake');
+
+    // Shaking "no": left, right, left, right, left.
+    const hints = [];
+    for (let swing = 0; swing < 5; swing += 1) {
+      await run(`IMU 0 ${swing % 2 ? -250 : 250} 0 0`);
+      await run('TICK 120');
+      hints.push((await state()).hint);
+    }
+    view = await state();
+    assert.equal(view.screenOn, 0);
+    assert.ok(hints.includes('Shake 3/5') && hints.includes('Shake 4/5'), hints.join(', '));
+    assert.ok(diagnostics.includes('shake detected from gyro'));
+    assert.ok(diagnostics.includes('screen_turn_on(0) -> 0'));
+
+    // Nodding: down, up, down, up, down.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    for (let swing = 0; swing < 5; swing += 1) {
+      await run(`IMU 0 0 0 ${swing % 2 ? 250 : -250}`);
+      await run('TICK 120');
+    }
+    view = await state();
+    assert.equal(view.screenOn, 1);
+    assert.equal(view.hint, 'Display on');
+    assert.ok(diagnostics.includes('screen_turn_on(1) -> 0'));
+
+    // Swings too far apart do not add up.
+    await run('IMU 0 0 0 0');
+    await run('TICK 1000');
+    for (let swing = 0; swing < 6; swing += 1) {
+      await run(`IMU 0 ${swing % 2 ? -250 : 250} 0 0`);
+      await run('TICK 80');
+      await run('IMU 0 0 0 0');
+      await run('TICK 900');
+    }
+    assert.equal((await state()).screenOn, 1);
+    // Firmware gestures are logged too.
+    await run('GESTURE 4');
+    assert.ok(diagnostics.includes('firmware gesture 4 active=1'));
   } finally {
     sim.close();
   }

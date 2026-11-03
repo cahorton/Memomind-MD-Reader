@@ -74,6 +74,11 @@ input[type="search"] { width: 100%; margin-top: 12px; padding: 8px 10px; border:
 .settings-grid label.toggle { display: flex; align-items: center; gap: 8px; color: #c9dcd5; font-size: 13px; }
 input[type="range"] { width: 100%; accent-color: #4fd29f; }
 input[type="checkbox"] { accent-color: #4fd29f; width: 16px; height: 16px; }
+.log-panel { margin-top: 14px; padding: 10px 14px; border: 1px solid #1d332d; border-radius: 12px; color: #8aa69c; font-size: 12px; }
+.log-panel summary { cursor: pointer; font-weight: 700; color: #c9dcd5; }
+.log-actions { display: flex; gap: 8px; margin-top: 8px; }
+.log-actions button { padding: 5px 10px; font-size: 12px; }
+.log-lines { max-height: 40vh; margin: 8px 0 0; padding: 8px; overflow: auto; border-radius: 8px; background: #050a09; color: #b9d3c9; font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .status { margin-top: 14px; color: #87a99d; font-size: 12px; min-height: 1.2em; }
 .status.error { color: #ffaaa6; }
 

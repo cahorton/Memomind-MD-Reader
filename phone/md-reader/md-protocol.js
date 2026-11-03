@@ -108,9 +108,11 @@ export function encodeNotice(text) {
 }
 
 export function decodeEvent(bytes) {
-  if (!(bytes instanceof Uint8Array) || bytes.length < 6 || bytes[0] !== PROTOCOL_VERSION) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 2 || bytes[0] !== PROTOCOL_VERSION) {
     throw new Error('Invalid MD reader event');
   }
+  if (bytes[1] === 7) return { type: 'diag', text: new TextDecoder().decode(bytes.subarray(2)) };
+  if (bytes.length < 6) throw new Error('Invalid MD reader event');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const session = view.getUint32(2);
   switch (bytes[1]) {
@@ -137,6 +139,7 @@ export function decodeEvent(bytes) {
   case 6:
     if (bytes.length !== 7) break;
     return { type: 'autoscroll', session, on: bytes[6] !== 0 };
+
   default:
     break;
   }

@@ -30,6 +30,9 @@ const breadcrumbs = $('#breadcrumbs');
 const pageInfo = $('#page-info');
 const preview = $('#preview');
 const status = $('#status');
+const logLines = $('#log-lines');
+const MAX_LOG_LINES = 300;
+const logEntries = [];
 
 const settingInputs = {
   headEnabled: $('#head-enabled'),
@@ -66,6 +69,30 @@ let currentFolder = '';
 function setStatus(message, isError = false) {
   status.textContent = message;
   status.classList.toggle('error', isError);
+}
+
+function log(source, text) {
+  const time = new Date().toTimeString().slice(0, 8);
+  logEntries.push(`${time} ${source} ${text}`);
+  if (logEntries.length > MAX_LOG_LINES) logEntries.shift();
+  logLines.textContent = logEntries.join('\n');
+  logLines.scrollTop = logLines.scrollHeight;
+}
+
+async function copyLog() {
+  const text = logEntries.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus('Glasses log copied.');
+  } catch {
+    // Some WebViews block the clipboard: select the text for a manual copy.
+    const range = document.createRange();
+    range.selectNodeContents(logLines);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    setStatus('Log selected. Use your phone\'s Copy to copy it.');
+  }
 }
 
 function setConnection(text, isConnected) {
@@ -338,6 +365,10 @@ function scheduleSave() {
 }
 
 function onControllerChange(reason, detail) {
+  if (reason === 'diag') {
+    log('glasses', detail);
+    return;
+  }
   if (reason === 'missing') {
     setStatus(`No note named "${detail.target.note}" in the vault.`, true);
     return;
@@ -373,6 +404,7 @@ async function saveSettings() {
   const settings = readSettings();
   showSettings(settings);
   await controller.applySettings(settings);
+  log('phone', `sent settings: tilt ${settings.pitchThreshold}°, turn ${settings.turnThreshold}, shake-to-sleep ${settings.gestureSleep ? 'on' : 'off'}`);
   await gm.storage.set(SETTINGS_KEY, settings).catch(() => undefined);
   if (controller.current) renderReader();
 }
@@ -385,8 +417,10 @@ function handleMessage(message) {
   try {
     event = decodeEvent(message.data);
   } catch {
+    log('phone', `unreadable glasses message (${message.data?.length ?? 0} bytes)`);
     return;
   }
+  if (event.type === 'hello') log('phone', 'glasses plugin started or reconnected');
   // Keep glasses events in order; a window reply must not overtake an open.
   eventQueue = eventQueue
     .then(() => controller.handleEvent(event))
@@ -418,6 +452,7 @@ async function initialize() {
   gm.plugin.onMessage(handleMessage);
   gm.device.onConnection((event) => {
     connected = event.connected === true;
+    log('phone', connected ? 'glasses connected' : 'glasses disconnected');
     setConnection(connected ? 'Glasses connected' : 'Glasses disconnected', connected);
     if (connected) {
       eventQueue = eventQueue.then(async () => {
@@ -462,6 +497,11 @@ importMd.addEventListener('click', () => void importNotes('md'));
 importZip.addEventListener('click', () => void importNotes('zip'));
 search.addEventListener('input', () => renderLibrary());
 backButton.addEventListener('click', () => void controller.back());
+$('#log-copy').addEventListener('click', () => void copyLog());
+$('#log-clear').addEventListener('click', () => {
+  logEntries.length = 0;
+  logLines.textContent = '';
+});
 autoScrollButton.addEventListener('click', () => void controller.setAutoScroll(!controller.autoScroll));
 bridgeState.addEventListener('click', () => {
   if (!controller) globalThis.location.reload();

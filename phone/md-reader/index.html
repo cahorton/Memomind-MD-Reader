@@ -87,6 +87,16 @@
         </details>
 
         <p id="status" class="status">Starting…</p>
+
+        <details id="log-panel" class="log-panel">
+          <summary>Glasses log</summary>
+          <p class="hint">What the glasses report: gestures they see, settings they receive, and whether display and IMU calls succeed. Copy it to share.</p>
+          <div class="log-actions">
+            <button id="log-copy" type="button">Copy log</button>
+            <button id="log-clear" type="button">Clear</button>
+          </div>
+          <pre id="log-lines" class="log-lines"></pre>
+        </details>
       </section>
     </main>
 

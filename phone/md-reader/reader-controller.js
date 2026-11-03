@@ -151,6 +151,10 @@ export class ReaderController {
   }
 
   async handleEvent(event) {
+    if (event.type === 'diag') {
+      this.onChange('diag', event.text);
+      return;
+    }
     if (event.type === 'hello') {
       await this.applySettings({});
       await this.reopen();
