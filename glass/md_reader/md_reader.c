@@ -66,6 +66,11 @@
 #define FLAG_INVERT_PITCH 0x01U
 #define FLAG_INVERT_YAW 0x02U
 #define FLAG_TILT_GUIDE 0x04U
+#define FLAG_GESTURE_SLEEP 0x08U
+
+/* Shake "no" this many times to turn the display off, nod to turn it on. */
+#define GESTURE_COUNT 3U
+#define GESTURE_WINDOW_MS 4000U
 
 #define DEFAULT_PITCH_THRESHOLD 12U
 #define DEFAULT_REPEAT_MS 0U
@@ -98,6 +103,8 @@
 #define ARROW_HEIGHT 5
 #define ARROW_BRIGHT_MS 2000U
 #define GUIDE_WIDTH 14
+/* The tilt guide's track spans +/- this many degrees from neutral. */
+#define GUIDE_RANGE_DEG 40
 
 #define COLOR_TEXT 0xFFU
 #define COLOR_DIM 0xDBU
@@ -204,6 +211,16 @@ typedef struct {
     /* Head tracking. */
     uint8_t imu_available;
     uint8_t imu_running;
+    uint8_t gestures_available;
+    gm_plugin_imu_modes_t imu_modes;
+
+    /* Display power, switched by head gestures. */
+    uint8_t display_power_available;
+    uint8_t screen_off;
+    uint8_t shake_count;
+    uint8_t nod_count;
+    uint32_t shake_first_ms;
+    uint32_t nod_first_ms;
     uint32_t imu_elapsed;
     uint8_t calibration_count;
     int32_t calibration_sum;
@@ -494,6 +511,34 @@ static void show_message(md_reader_t *self, const char *text)
 /* Layout                                                              */
 /* ------------------------------------------------------------------ */
 
+/* Pixels from the middle of the tilt guide for a tilt of `degrees`. */
+static int32_t guide_offset(const md_reader_t *self, int32_t degrees)
+{
+    int32_t half = self->viewport_height / 2;
+    int32_t offset = degrees * half / GUIDE_RANGE_DEG;
+    if (offset < -half) offset = -half;
+    if (offset > half) offset = half;
+    return offset;
+}
+
+/* Ticks at +/- the tilt threshold, on the same scale as the marker, so a
+ * smaller threshold draws them closer together. */
+static void layout_guide_ticks(md_reader_t *self)
+{
+    int16_t x = (int16_t)(self->display_width - SIDE_MARGIN - GUIDE_WIDTH / 2);
+    int16_t middle = (int16_t)(self->viewport_y + self->viewport_height / 2);
+    int16_t reach = (int16_t)guide_offset(self, self->pitch_threshold);
+    if (self->guide_tick[0] == 0) return;
+    for (uint8_t tick = 0U; tick < 2U; ++tick) {
+        int16_t y = (int16_t)(tick == 0U ? middle - reach : middle + reach);
+        self->tick_points[tick][0].x = (int16_t)(x - 5);
+        self->tick_points[tick][0].y = y;
+        self->tick_points[tick][1].x = (int16_t)(x + 5);
+        self->tick_points[tick][1].y = y;
+        self->ui->line_set_points(self->guide_tick[tick], self->tick_points[tick], 2U);
+    }
+}
+
 static void calculate_layout(md_reader_t *self)
 {
     gm_plugin_lvgl_style_value_t font = {0};
@@ -549,17 +594,7 @@ static void calculate_layout(md_reader_t *self)
         self->track_points[1].x = x;
         self->track_points[1].y = (int16_t)(self->viewport_y + self->viewport_height);
         self->ui->line_set_points(self->guide_track, self->track_points, 2U);
-        for (uint8_t tick = 0U; tick < 2U; ++tick) {
-            int16_t y = (int16_t)(self->viewport_y +
-                (tick == 0U ? self->viewport_height / 4
-                            : self->viewport_height * 3 / 4));
-            self->tick_points[tick][0].x = (int16_t)(x - 4);
-            self->tick_points[tick][0].y = y;
-            self->tick_points[tick][1].x = (int16_t)(x + 4);
-            self->tick_points[tick][1].y = y;
-            self->ui->line_set_points(self->guide_tick[tick],
-                                      self->tick_points[tick], 2U);
-        }
+        layout_guide_ticks(self);
         self->ui->obj_set_size(self->guide_marker, 8, 8);
         self->guide_y = INT16_MIN;
     }
@@ -1010,30 +1045,38 @@ static void update_guide_visibility(md_reader_t *self)
     set_hidden(self, self->guide_marker, hidden);
 }
 
-static void set_imu(md_reader_t *self, bool on)
+/* Enables what the settings need: raw samples for head control (not while
+ * the display is off) and firmware nod/shake events for display power, which
+ * stay on while the display is off so a nod can wake it. `active` false is
+ * suspend/stop. */
+static void set_imu(md_reader_t *self, bool active)
 {
-    if (self->imu_available == 0U) return;
-    if (on && self->imu_running == 0U) {
-        self->imu_running = self->host->imu_enable(GM_PLUGIN_IMU_ENABLE_RAW) ==
-            GM_PLUGIN_OK ? 1U : 0U;
-    } else if (!on && self->imu_running != 0U) {
-        (void)self->host->imu_enable(GM_PLUGIN_IMU_ENABLE_NONE);
-        self->imu_running = 0U;
-    }
+    gm_plugin_imu_modes_t wanted = GM_PLUGIN_IMU_ENABLE_NONE;
+    if (self->imu_available == 0U && self->gestures_available == 0U) return;
+    if (active && self->imu_available != 0U && self->head_enabled != 0U &&
+        self->screen_off == 0U)
+        wanted |= GM_PLUGIN_IMU_ENABLE_RAW;
+    if (self->gestures_available != 0U &&
+        (self->flags & FLAG_GESTURE_SLEEP) != 0U &&
+        (active || self->screen_off != 0U))
+        wanted |= GM_PLUGIN_IMU_ENABLE_GESTURES;
+    if (wanted != self->imu_modes && self->host->imu_enable(wanted) == GM_PLUGIN_OK)
+        self->imu_modes = wanted;
+    self->imu_running = (self->imu_modes & GM_PLUGIN_IMU_ENABLE_RAW) != 0U ? 1U : 0U;
     reset_head_state(self);
     update_guide_visibility(self);
 }
 
-static void update_guide(md_reader_t *self, int16_t delta)
+static void update_guide(md_reader_t *self, int32_t delta_fp)
 {
-    /* Thresholds sit at the ticks, a quarter of the track from the middle. */
+    /* Looking up moves the marker up; it crosses a tick at the threshold.
+     * delta_fp keeps fractions of a degree so the marker lines up exactly. */
     int32_t half = self->viewport_height / 2;
-    int32_t threshold = self->pitch_threshold == 0U ? 1 : self->pitch_threshold;
-    int32_t offset = -(int32_t)delta * (half / 2) / threshold;
+    int32_t offset = delta_fp * half / (GUIDE_RANGE_DEG * PITCH_SCALE);
     int16_t y;
     if (offset < -half) offset = -half;
     if (offset > half) offset = half;
-    y = (int16_t)(self->viewport_y + half + offset - 4);
+    y = (int16_t)(self->viewport_y + half - offset - 4);
     if (y != self->guide_y) {
         self->guide_y = y;
         self->ui->obj_set_pos(self->guide_marker,
@@ -1198,8 +1241,9 @@ static void update_head(md_reader_t *self, uint32_t elapsed_ms)
     gm_plugin_imu_sample_t sample;
     uint32_t dt;
     int16_t pitch;
-    int16_t delta;
-    if (self->imu_running == 0U || self->head_enabled == 0U) return;
+    if (self->imu_running == 0U || self->head_enabled == 0U ||
+        self->screen_off != 0U)
+        return;
     self->imu_elapsed += elapsed_ms;
     if (self->imu_elapsed < IMU_SAMPLE_MS) return;
     dt = self->imu_elapsed > 250U ? 250U : self->imu_elapsed;
@@ -1222,9 +1266,8 @@ static void update_head(md_reader_t *self, uint32_t elapsed_ms)
     }
     /* Auto-scroll pages on a timer "regardless of where I'm looking". */
     if (self->auto_scroll == 0U) update_pitch(self, pitch, dt);
-    delta = (int16_t)(((int32_t)pitch * PITCH_SCALE - self->neutral_fp) /
-                      PITCH_SCALE);
-    if ((self->flags & FLAG_TILT_GUIDE) != 0U) update_guide(self, delta);
+    if ((self->flags & FLAG_TILT_GUIDE) != 0U)
+        update_guide(self, (int32_t)pitch * PITCH_SCALE - self->neutral_fp);
     if (self->tilt_zone == 0 && self->settling == 0U)
         update_yaw(self, &sample, dt);
 }
@@ -1273,7 +1316,7 @@ static void set_autoscroll(md_reader_t *self, bool on, const char *notice)
 static void update_autoscroll(md_reader_t *self, uint32_t elapsed_ms)
 {
     if (self->auto_scroll == 0U || self->displayed == 0U ||
-        self->pending != PENDING_NONE)
+        self->pending != PENDING_NONE || self->screen_off != 0U)
         return;
     self->auto_elapsed += elapsed_ms;
     if (self->auto_elapsed < self->auto_interval_ms) return;
@@ -1400,6 +1443,7 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
     apply_brightness(self);
     self->head_enabled = data[2] != 0U ? 1U : 0U;
     self->pitch_threshold = data[3] < 3U ? 3U : (data[3] > 45U ? 45U : data[3]);
+    layout_guide_ticks(self);
     self->repeat_ms = read_u16(data + 4);
     if (self->repeat_ms != 0U && self->repeat_ms < MIN_REPEAT_MS)
         self->repeat_ms = MIN_REPEAT_MS;
@@ -1420,8 +1464,8 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
         }
     }
     if (self->head_enabled != previous_head ||
-        ((self->flags ^ previous_flags) & FLAG_INVERT_PITCH) != 0U)
-        set_imu(self, self->head_enabled != 0U);
+        ((self->flags ^ previous_flags) & (FLAG_INVERT_PITCH | FLAG_GESTURE_SLEEP)) != 0U)
+        set_imu(self, true);
     update_guide_visibility(self);
     update_hint(self);
     return true;
@@ -1469,17 +1513,71 @@ static void toggle_head(md_reader_t *self)
         return;
     }
     self->head_enabled = self->head_enabled == 0U ? 1U : 0U;
-    set_imu(self, self->head_enabled != 0U);
+    set_imu(self, true);
     /* Tapping to resume is a deliberate "this is neutral". */
     self->confirm_on_calibration = self->head_enabled;
     show_notice(self, self->head_enabled != 0U ? "Head scroll on, recentred"
                                                : "Head scroll paused");
 }
 
+static void set_screen(md_reader_t *self, bool on)
+{
+    if (self->display_power_available == 0U) return;
+    if (!on) {
+        if (self->host->display_control.screen_turn_on(false) != GM_PLUGIN_OK) return;
+        self->screen_off = 1U;
+        self->nod_count = 0U;
+    } else {
+        (void)self->host->display_control.screen_turn_on(true);
+        self->screen_off = 0U;
+        self->shake_count = 0U;
+        show_notice(self, "Display on");
+    }
+    /* Raw head tracking pauses while off and recalibrates on waking. */
+    set_imu(self, true);
+}
+
+/* Counts one gesture; true on the GESTURE_COUNT-th within the window. */
+static bool count_gesture(uint8_t *count, uint32_t *first_ms, uint32_t now_ms)
+{
+    if (*count == 0U || now_ms - *first_ms > GESTURE_WINDOW_MS) {
+        *count = 1U;
+        *first_ms = now_ms;
+    } else {
+        ++*count;
+    }
+    if (*count < GESTURE_COUNT) return false;
+    *count = 0U;
+    return true;
+}
+
+static bool handle_gesture(md_reader_t *self, const gm_plugin_event_t *event)
+{
+    gm_plugin_imu_gesture_t gesture = event->data.imu_gesture.gesture;
+    if (!event->data.imu_gesture.active ||
+        (self->flags & FLAG_GESTURE_SLEEP) == 0U)
+        return true;
+    if (gesture == GM_PLUGIN_IMU_GESTURE_SHAKE && self->screen_off == 0U) {
+        if (count_gesture(&self->shake_count, &self->shake_first_ms,
+                          event->timestamp_ms))
+            set_screen(self, false);
+    } else if (gesture == GM_PLUGIN_IMU_GESTURE_NOD && self->screen_off != 0U) {
+        if (count_gesture(&self->nod_count, &self->nod_first_ms,
+                          event->timestamp_ms))
+            set_screen(self, true);
+    }
+    return true;
+}
+
 static bool handle_button(md_reader_t *self, const gm_plugin_event_t *event)
 {
     gm_plugin_button_t button = event->data.button.button;
     gm_plugin_button_action_t action = event->data.button.action;
+    /* While the display is off, any button only wakes it. */
+    if (self->screen_off != 0U) {
+        if (action != GM_PLUGIN_BUTTON_ACTION_RELEASE) set_screen(self, true);
+        return true;
+    }
     if (button == GM_PLUGIN_BUTTON_PRIMARY) {
         switch (action) {
         case GM_PLUGIN_BUTTON_ACTION_SINGLE:
@@ -1551,6 +1649,8 @@ static bool on_event(void *opaque, const gm_plugin_event_t *event)
         return receive_message(self, event->data.bt.data, event->data.bt.length);
     case GM_PLUGIN_EVENT_BUTTON:
         return handle_button(self, event);
+    case GM_PLUGIN_EVENT_IMU_GESTURE:
+        return handle_gesture(self, event);
     case GM_PLUGIN_EVENT_CONNECTION:
         self->connected = event->data.connection.connected ? 1U : 0U;
         if (self->connected != 0U) {
@@ -1707,7 +1807,7 @@ static gm_plugin_result_t on_start(void *opaque)
     self->settings_received = 0U;
     self->dwell_ms = DEFAULT_DWELL_MS;
     self->turn_threshold = DEFAULT_TURN_THRESHOLD;
-    self->flags = FLAG_TILT_GUIDE;
+    self->flags = FLAG_TILT_GUIDE | FLAG_GESTURE_SLEEP;
     self->font_mode = FONT_DEFAULT;
     self->connected = 1U;
     self->exit_active = 0U;
@@ -1723,6 +1823,10 @@ static gm_plugin_result_t on_start(void *opaque)
     self->brightness_blocked = 0U;
     self->auto_scroll = 0U;
     self->auto_interval_ms = 4000U;
+    self->screen_off = 0U;
+    self->shake_count = 0U;
+    self->nod_count = 0U;
+    self->imu_modes = GM_PLUGIN_IMU_ENABLE_NONE;
     wipe_private_data(self);
     result = create_ui(self);
     if (result != GM_PLUGIN_OK) {
@@ -1801,6 +1905,11 @@ static void on_resume(void *opaque)
 static void on_stop(void *opaque)
 {
     md_reader_t *self = opaque;
+    /* Never leave the display off behind us. */
+    if (self->screen_off != 0U) {
+        (void)self->host->display_control.screen_turn_on(true);
+        self->screen_off = 0U;
+    }
     set_imu(self, false);
     release_brightness(self);
     wipe_private_data(self);
@@ -1847,6 +1956,12 @@ gm_plugin_result_t gm_plugin_entry(const gm_plugin_host_api_t *host,
     reader.imu_available =
         (host->capabilities & GM_PLUGIN_CAP_IMU_RAW) != 0U &&
         host->imu_enable != 0 && host->imu_read != 0 ? 1U : 0U;
+    reader.gestures_available =
+        (host->capabilities & GM_PLUGIN_CAP_IMU_EVENTS) != 0U &&
+        host->imu_enable != 0 ? 1U : 0U;
+    reader.display_power_available =
+        (host->capabilities & GM_PLUGIN_CAP_DISPLAY_CONTROL) != 0U &&
+        host->display_control.screen_turn_on != 0 ? 1U : 0U;
     /* Brightness holding is optional too. */
     reader.display_control_available =
         (host->capabilities & GM_PLUGIN_CAP_DISPLAY_CONTROL) != 0U &&

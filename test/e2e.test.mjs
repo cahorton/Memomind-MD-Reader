@@ -17,6 +17,7 @@ const simPath = join(root, '.build', 'host_sim');
 const sdkInclude = process.env.GM_SDK_INCLUDE ?? join(root, '..', 'plugin-open-platform', 'GlassSDK', 'include');
 
 const BUTTON = { primary: 1, up: 2, down: 3, left: 4, right: 5, back: 10 };
+const GESTURE = { nod: 1, shake: 4 };
 const ACTION = { single: 1, double: 2, long: 3, veryLong: 4, release: 5, trigger: 6 };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -520,6 +521,93 @@ test('brightness can be held, at the current level or a fixed one', async () => 
     assert.equal(view.brightness, 8);
     await controller.applySettings({ lockBrightness: false });
     assert.equal((await state()).brightnessBlocked, 0);
+  } finally {
+    sim.close();
+  }
+});
+
+test('tilt guide ticks sit at the threshold: closer together at 6 than at 12 degrees', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    let view = await state();
+    const gap12 = view.ticks[1] - view.ticks[0];
+    assert.equal(view.middle - view.ticks[0], view.ticks[1] - view.middle);
+    await controller.applySettings({ pitchThreshold: 6 });
+    view = await state();
+    const gap6 = view.ticks[1] - view.ticks[0];
+    assert.ok(Math.abs(gap6 * 2 - gap12) <= 2, `6 degrees gap ${gap6} should be half of 12 degrees gap ${gap12}`);
+    // The marker reaches a tick exactly when the tilt reaches the threshold.
+    await run('IMU 6 0 0 0');
+    await run('TICK 100');
+    view = await state();
+    assert.ok(Math.abs(view.marker - view.ticks[0]) <= 1, `marker ${view.marker} vs tick ${view.ticks[0]}`);
+  } finally {
+    sim.close();
+  }
+});
+
+test('three head shakes turn the display off; three nods turn it back on', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    assert.equal((await state()).imuMode, 3);
+    // Shakes spread too far apart do nothing.
+    await run(`GESTURE ${GESTURE.shake}`);
+    await run('TICK 2500');
+    await run(`GESTURE ${GESTURE.shake}`);
+    await run('TICK 2500');
+    await run(`GESTURE ${GESTURE.shake}`);
+    assert.equal((await state()).screenOn, 1);
+    // Three within a few seconds: off. Raw tracking stops, gestures stay on
+    // (IMU mode bits: 1 gestures, 2 raw).
+    await run('TICK 600');
+    await run(`GESTURE ${GESTURE.shake}`);
+    await run('TICK 600');
+    await run(`GESTURE ${GESTURE.shake}`);
+    let view = await state();
+    assert.equal(view.screenOn, 0);
+    assert.equal(view.imuMode, 1);
+
+    // While off, tilting and auto-scroll do not page.
+    await controller.setAutoScroll(true);
+    await run('IMU -25 0 0 0');
+    await run('TICK 10000');
+    assert.equal((await state()).pageIndex, 0);
+    await controller.setAutoScroll(false);
+    await run('IMU 0 0 0 0');
+
+    // Two nods are not enough; the third wakes it and head tracking resumes.
+    await run(`GESTURE ${GESTURE.nod}`);
+    await run('TICK 500');
+    await run(`GESTURE ${GESTURE.nod}`);
+    assert.equal((await state()).screenOn, 0);
+    await run('TICK 500');
+    await run(`GESTURE ${GESTURE.nod}`);
+    view = await state();
+    assert.equal(view.screenOn, 1);
+    assert.equal(view.imuMode, 3);
+    assert.equal(view.hint, 'Display on');
+
+    // Any button also wakes it, and that press does nothing else.
+    for (let index = 0; index < 3; index += 1) {
+      await run(`GESTURE ${GESTURE.shake}`);
+      await run('TICK 300');
+    }
+    assert.equal((await state()).screenOn, 0);
+    await run(`BTN ${BUTTON.down} ${ACTION.trigger}`);
+    view = await state();
+    assert.equal(view.screenOn, 1);
+    assert.equal(view.pageIndex, 0);
+
+    // Turned off in settings, shakes are ignored and gestures are not enabled.
+    await controller.applySettings({ gestureSleep: false });
+    assert.equal((await state()).imuMode, 2);
+    for (let index = 0; index < 3; index += 1) {
+      await run(`GESTURE ${GESTURE.shake}`);
+      await run('TICK 300');
+    }
+    assert.equal((await state()).screenOn, 1);
   } finally {
     sim.close();
   }

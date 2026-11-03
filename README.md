@@ -16,6 +16,8 @@ can be followed and retraced.
 | **Double-click** | Open the highlighted link |
 | **Long press** | Back to the previous note (with nothing to go back to: 3 s exit countdown, release to cancel) |
 | **Single click** | Stop auto-scroll if it is running; otherwise pause or resume head control (resuming recentres "neutral" on your current pose) |
+| **Shake head "no" 3 times** (within ~4 s) | Turn the glasses display off; head tracking and auto-scroll pause |
+| **Nod 3 times** (or press any button) while off | Turn the display back on |
 | **Start auto-scroll** (phone button) | A page every *pause*, wherever you look; stops at the end of the note, on a tap, or when another note opens |
 | Ring up/down, page up/down | Previous / next page |
 | Ring left/right | Previous / next link |
@@ -58,8 +60,14 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
 - Link turns are ignored while a tilt is active, so looking up and to the side
   never does both.
 - An optional **tilt guide** in the right margin shows where your head is
-  relative to the two thresholds (the ticks). The marker brightens when the
-  head is past a threshold.
+  relative to the two thresholds (the ticks). The track spans ±40° and the
+  ticks sit at ± your **Tilt to page** angle, so a 6° threshold draws them
+  half as far apart as 12°. The marker brightens when the head is past a
+  threshold.
+- **Shake head 3× to turn the display off, nod 3× to turn it on** (default
+  on) uses the glasses' own nod and shake recognition. While the display is
+  off, the first button press also wakes it and does nothing else, and
+  MD Reader always turns the display back on when it closes.
 
 On the glasses, links are underlined. The highlighted link is drawn inverted.
 The status line shows the link count or a notice, plus `page / total` (or
@@ -140,6 +148,11 @@ to this folder (or pass `--sdk`). Then:
 `npm run studio -- --remove` undoes it.
 
 ## Not yet verified on hardware
+
+- How many firmware `SHAKE`/`NOD` events one head shake or nod produces. If
+  one "no" counts as more than one shake, the display will turn off sooner
+  than expected; the count (3 within 4 s) is in `GESTURE_COUNT` /
+  `GESTURE_WINDOW_MS` in `md_reader.c`.
 
 - The IMU axis signs are inferred from the SDK's `imu` example: pitch rises when
   you look up, and `gyro_x - gyro_y` is negative when you turn left. If either

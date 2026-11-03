@@ -25,6 +25,8 @@ export const defaultSettings = Object.freeze({
   pauseMs: 4000,
   // Hold the glasses' brightness (stop automatic dimming); 0 keeps the level.
   lockBrightness: true,
+  // Shake "no" 3 times to turn the glasses display off, nod 3 times to wake.
+  gestureSleep: true,
   brightnessLevel: 0,
   turnThreshold: 120,
   invertPitch: false,

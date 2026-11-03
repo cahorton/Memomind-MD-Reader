@@ -42,6 +42,7 @@ const settingInputs = {
   invertPitch: $('#invert-pitch'),
   invertYaw: $('#invert-yaw'),
   largeFont: $('#large-font'),
+  gestureSleep: $('#gesture-sleep'),
   lockBrightness: $('#lock-brightness'),
   brightnessLevel: $('#brightness'),
 };

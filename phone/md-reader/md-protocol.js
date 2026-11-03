@@ -13,6 +13,7 @@ export const settingFlags = Object.freeze({
   invertPitch: 0x01,
   invertYaw: 0x02,
   tiltGuide: 0x04,
+  gestureSleep: 0x08,
 });
 
 const encoder = new TextEncoder();
@@ -68,6 +69,7 @@ export function encodeSettings(settings) {
   if (settings.invertPitch) flags |= settingFlags.invertPitch;
   if (settings.invertYaw) flags |= settingFlags.invertYaw;
   if (settings.tiltGuide) flags |= settingFlags.tiltGuide;
+  if (settings.gestureSleep) flags |= settingFlags.gestureSleep;
   data[2] = settings.headEnabled ? 1 : 0;
   data[3] = Math.max(3, Math.min(45, Math.round(settings.pitchThreshold)));
   // The repeat interval is the continuous-mode pause; 0 means one page per look.

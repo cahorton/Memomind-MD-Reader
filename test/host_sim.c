@@ -10,6 +10,7 @@
  *   IMU <pitch> <gx> <gy> <gz> set the sample returned by imu_read()
  *   TICK <ms>                 run on_loop in 20 ms steps
  *   CONNECT <0|1>             deliver a connection event
+ *   GESTURE <id>              deliver an active firmware IMU gesture
  *   DUMP                      print the visible state as one JSON line
  *
  * Every command ends with "OK". bt_send() prints "EVT <hex>" lines.
@@ -185,6 +186,9 @@ static int brightness_level = 5;
 static gm_plugin_result_t host_auto_brightness_block(bool blocked) { brightness_blocked = blocked; return GM_PLUGIN_OK; }
 static gm_plugin_result_t host_brightness_set(gm_plugin_display_brightness_t level) { brightness_level = (int)level; return GM_PLUGIN_OK; }
 static gm_plugin_display_brightness_t host_brightness_get(void) { return (gm_plugin_display_brightness_t)brightness_level; }
+static int screen_on = 1;
+static gm_plugin_result_t host_screen_turn_on(bool on) { screen_on = on; return GM_PLUGIN_OK; }
+static bool host_screen_is_on(void) { return screen_on != 0; }
 static gm_plugin_result_t host_extension(gm_plugin_extension_id_t id, const void **api)
 {
     if (id != GM_PLUGIN_EXTENSION_LIBC) { *api = 0; return GM_PLUGIN_ENOTSUP; }
@@ -227,6 +231,8 @@ static void setup_host(void)
             .auto_brightness_block = host_auto_brightness_block,
             .brightness_set = host_brightness_set,
             .brightness_get = host_brightness_get,
+            .screen_turn_on = host_screen_turn_on,
+            .screen_is_on = host_screen_is_on,
         },
         .bt_send = host_bt_send, .imu_enable = host_imu_enable, .imu_read = host_imu_read,
         .app_exit = host_exit, .extension_get = host_extension,
@@ -269,6 +275,12 @@ static void dump(void)
            r->viewport_y, r->viewport_y + r->viewport_height);
     printf(",\"autoScroll\":%u,\"brightnessBlocked\":%d,\"brightness\":%d",
            r->auto_scroll, brightness_blocked, brightness_level);
+    printf(",\"screenOn\":%d,\"imuMode\":%d", screen_on, imu_mode);
+    printf(",\"ticks\":[%d,%d],\"middle\":%d,\"marker\":%d",
+           r->guide_tick[0] && r->guide_tick[0]->point_count ? (int)r->guide_tick[0]->points[0].y : -1,
+           r->guide_tick[1] && r->guide_tick[1]->point_count ? (int)r->guide_tick[1]->points[0].y : -1,
+           r->viewport_y + r->viewport_height / 2,
+           r->guide_marker ? r->guide_marker->y + 4 : -1);
     printf(",\"underlines\":[");
     for (unsigned i = 0; i < MAX_UNDERLINES; ++i) {
         gm_plugin_lvgl_obj_t *line = r->underline[i];
@@ -345,6 +357,11 @@ int main(void)
         } else if (strncmp(line, "CONNECT ", 8) == 0) {
             event.type = GM_PLUGIN_EVENT_CONNECTION;
             event.data.connection.connected = atoi(line + 8) != 0;
+            descriptor.on_event(descriptor.context, &event);
+        } else if (strncmp(line, "GESTURE ", 8) == 0) {
+            event.type = GM_PLUGIN_EVENT_IMU_GESTURE;
+            event.data.imu_gesture.gesture = (gm_plugin_imu_gesture_t)atoi(line + 8);
+            event.data.imu_gesture.active = true;
             descriptor.on_event(descriptor.context, &event);
         } else if (strncmp(line, "DUMP", 4) == 0) {
             dump();
