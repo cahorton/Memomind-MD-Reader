@@ -38,18 +38,19 @@ Head tracking details (all adjustable in the phone plugin's **Head control** pan
   went: pointing down below the text, or pointing up above it. It is bright
   for 2 s, then stays dim until the next turn, so you can still tell after
   looking away.
-- **Neutral follows you.** It is first taken when head control starts (and on
-  each single click), but it does not stay fixed:
-  - when you come back from a page turn, wherever your head settles becomes
-    the new neutral, so the return swing never pages the other way;
-  - outside a tilt, neutral slowly follows posture changes (over ~5 s);
-  - a tilt held for 2.5 s past its page turn is taken as your new reading
-    pose. This fixes a start taken while looking down at the phone: you get at
-    most one stray page, not endless paging. If you go back to the old pose
-    within a few seconds, it is restored without paging. Continuous mode keeps
-    this only until neutral is confirmed: by a single click, by coming back
-    from any page turn, or by such a re-centre. After that, a held look
-    scrolls for as long as you hold it.
+- **Neutral stays put.** It is taken when head control starts, and moves only
+  when you single-click the glasses or tap **Recentre tilt** on the phone. It
+  does not follow your head while you read. (Up to v0.10 it did, which made it
+  creep lower page after page.)
+  - Coming back from a page turn, tilts are ignored for 0.6 s, so the return
+    swing never pages the other way.
+  - One safety net remains for a start taken while looking down at the phone:
+    until neutral is confirmed (a click, a Recentre, or coming back from any
+    page turn), a tilt held 2.5 s past its page turn becomes the new
+    straight-ahead. You get at most one stray page, not endless paging. If you
+    go back to the old pose within a few seconds, it is restored without
+    paging. After that, a held look in continuous mode scrolls for as long as
+    you hold it.
 - When a phone setting change reaches the glasses, they show
   **Settings updated**.
 - **Hold glasses brightness** (default on): stops the glasses' automatic
@@ -85,8 +86,10 @@ the dark text with no background on the glasses, so MD Reader draws the
 highlight itself.)
 
 **Nod to open the highlighted link** (default on): one nod, down and back up
-within 1 s, each swing at least as fast as **Turn needed for links**, opens
-it. While a link is highlighted, a page turn waits at least 1 s and never
+within 1 s, each swing at least as fast as **Nod needed to open a link**
+(default 70, gentler than the 120 for link turns), opens it. Up/down moves
+that fall short are logged in the Glasses log with their peak speed, which
+tells you where to set the slider. While a link is highlighted, a page turn waits at least 1 s and never
 happens mid-nod, so a nod is not taken as a look down; a look down that you
 hold still turns the page as usual.
 The status line shows the link count or a notice, plus `page / total` (or

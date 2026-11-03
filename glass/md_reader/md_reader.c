@@ -31,13 +31,14 @@
 #define EVENT_AUTOSCROLL 6U
 #define EVENT_DIAG 7U
 
-#define GLASSES_VERSION 10U
+#define GLASSES_VERSION 11U
 #define DIAG_BYTES 120U
 
 #define OPEN_HEADER_BYTES 21U
 #define WINDOW_HEADER_BYTES 13U
 #define WINDOW_LINK_BYTES 10U
-#define SETTINGS_BYTES 14U
+#define SETTINGS_BYTES 16U
+#define SETTINGS_V2_BYTES 14U
 #define SETTINGS_V1_BYTES 12U
 #define AUTOSCROLL_BYTES 9U
 #define MIN_AUTOSCROLL_MS 500U
@@ -94,6 +95,10 @@
 #define NOD_GUARD_MS 1000U
 /* The link-open nod may be slower: down and back up within this long. */
 #define OPEN_NOD_GAP_MS 1000U
+/* Nods are gentler than head turns, so they have their own speed threshold. */
+#define DEFAULT_NOD_THRESHOLD 70U
+/* Up/down moves faster than this that miss the nod threshold are logged. */
+#define NOD_LOG_FLOOR 25
 
 #define DEFAULT_PITCH_THRESHOLD 12U
 #define DEFAULT_REPEAT_MS 0U
@@ -104,9 +109,7 @@
 #define IMU_SAMPLE_MS 40U
 #define CALIBRATION_SAMPLES 8U
 #define PITCH_SCALE 256
-#define DRIFT_TAU_MS 5000U
 #define SETTLE_MS 600U
-#define SETTLE_TAU_MS 150U
 #define HOLD_RECENTRE_MS 2500U
 #define RETURN_WINDOW_MS 6000U
 #define YAW_CONFIRM_SAMPLES 2U
@@ -225,6 +228,7 @@ typedef struct {
     uint8_t last_settings[SETTINGS_BYTES];
     uint8_t brightness_lock;
     uint8_t brightness_level;
+    uint16_t nod_threshold;
 
     /* Display control: holding brightness blocks automatic changes. */
     uint8_t display_control_available;
@@ -254,6 +258,7 @@ typedef struct {
     int8_t nod_sign;
     uint8_t nod_swings;
     uint32_t nod_gap;
+    int32_t nod_peak;
     uint32_t imu_elapsed;
     uint8_t calibration_count;
     int32_t calibration_sum;
@@ -1180,15 +1185,6 @@ static void update_guide(md_reader_t *self, int32_t delta_fp)
     }
 }
 
-/* Moves the neutral pose toward the current pitch with time constant tau. */
-static void track_neutral(md_reader_t *self, int16_t pitch, uint32_t dt,
-                          uint32_t tau)
-{
-    int32_t error = (int32_t)pitch * PITCH_SCALE - self->neutral_fp;
-    if (dt >= tau) self->neutral_fp += error;
-    else self->neutral_fp += error * (int32_t)dt / (int32_t)tau;
-}
-
 static void leave_zone(md_reader_t *self, bool settle)
 {
     self->tilt_zone = 0;
@@ -1211,14 +1207,15 @@ static void turn_page(md_reader_t *self, int8_t zone)
 /*
  * Pitch paging. A tilt past the threshold, held for the dwell, turns one page;
  * in continuous mode (repeat_ms != 0) it keeps turning a page every repeat_ms
- * while held. Looking down pages down. The neutral pose is not fixed:
- *  - coming back from a page turn, wherever the head settles is the new
- *    neutral, so the return swing never pages the other way;
- *  - outside a tilt, neutral slowly follows posture changes;
- *  - a tilt held well past its page turn is taken as the new reading pose
- *    (this heals a calibration taken while looking down at the phone), and
- *    a quick return to the old pose soon after restores it without paging.
- *    Continuous mode skips this once neutral is confirmed.
+ * while held. Looking down pages down. Neutral stays where it was set (at
+ * start, by a tap, or by the phone's Recentre); it does not follow the head
+ * while reading, which made it creep lower page after page.
+ *  - Coming back from a page turn, tilts are ignored briefly (SETTLE_MS) so
+ *    the return swing never pages the other way.
+ *  - Until neutral is confirmed (a tap, a Recentre, or a return from a page
+ *    turn), a tilt held well past its page turn is taken as the new reading
+ *    pose. This heals a start taken while looking down at the phone, and a
+ *    quick return to the old pose soon after restores it without paging.
  */
 static bool nod_opens_link(const md_reader_t *self);
 
@@ -1230,13 +1227,13 @@ static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
     uint32_t hold_limit;
     if (leave < 1) leave = 1;
     if (self->settling != 0U) {
-        track_neutral(self, pitch, dt, SETTLE_TAU_MS);
+        /* Coming back from a page turn: ignore tilts until the head settles,
+         * without moving neutral. */
         self->settle_elapsed += dt;
         if (self->settle_elapsed >= SETTLE_MS) self->settling = 0U;
         return;
     }
     self->return_window = self->return_window > dt ? self->return_window - dt : 0U;
-    if (self->tilt_zone == 0) track_neutral(self, pitch, dt, DRIFT_TAU_MS);
     delta = (int16_t)(((int32_t)pitch * PITCH_SCALE - self->neutral_fp) /
                       PITCH_SCALE);
     if (self->tilt_zone == 0) {
@@ -1277,14 +1274,15 @@ static void update_pitch(md_reader_t *self, int16_t pitch, uint32_t dt)
         turn_page(self, self->tilt_zone);
         return;
     }
-    /* Continuous mode keeps paging for as long as the tilt is held, once
-     * neutral is known to be right. */
-    hold_limit = self->repeat_ms != 0U && self->neutral_confirmed != 0U
-        ? UINT32_MAX : HOLD_RECENTRE_MS;
+    /* Until neutral is confirmed, a long hold means it was taken in the
+     * wrong pose (looking at the phone): the held pose becomes neutral. Once
+     * confirmed, neutral only moves on a tap or the phone's Recentre. */
+    hold_limit = self->neutral_confirmed != 0U ? UINT32_MAX : HOLD_RECENTRE_MS;
     if (self->zone_elapsed >= hold_limit) {
         self->previous_neutral_fp = self->neutral_fp;
         self->recentred_zone = self->tilt_zone;
         self->return_window = RETURN_WINDOW_MS;
+        self->neutral_fp = (int32_t)pitch * PITCH_SCALE;
         leave_zone(self, true);
         return;
     }
@@ -1399,7 +1397,19 @@ static void update_head_gestures(md_reader_t *self,
     if (!(sleep && self->screen_off != 0U) && !nod_opens_link(self)) {
         self->nod_swings = 0U;
         self->nod_sign = 0;
+        self->nod_peak = 0;
         return;
+    }
+    threshold = (int32_t)self->nod_threshold;
+    /* Log up/down moves that were too gentle to count, to tune the slider. */
+    if (vertical >= NOD_LOG_FLOOR || vertical <= -NOD_LOG_FLOOR) {
+        int32_t magnitude = vertical < 0 ? -vertical : vertical;
+        if (magnitude > self->nod_peak) self->nod_peak = magnitude;
+    } else if (self->nod_peak != 0) {
+        if (self->nod_peak < threshold)
+            diag(self, "up/down move peaked at %ld, nod needs %ld",
+                 (long)self->nod_peak, (long)threshold);
+        self->nod_peak = 0;
     }
     if (!count_swing(&self->nod_sign, &self->nod_swings, &self->nod_gap,
                      self->screen_off != 0U ? SWING_GAP_MS : OPEN_NOD_GAP_MS,
@@ -1658,7 +1668,9 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
     uint8_t previous_head = self->head_enabled;
     uint8_t previous_flags = self->flags;
     uint8_t received[SETTINGS_BYTES] = {0};
-    if (length != SETTINGS_BYTES && length != SETTINGS_V1_BYTES) return false;
+    if (length != SETTINGS_BYTES && length != SETTINGS_V2_BYTES &&
+        length != SETTINGS_V1_BYTES)
+        return false;
     self->libc->memcpy(received, data, length);
     /* Confirm on the glasses that a phone slider change arrived. */
     if (self->settings_received != 0U && self->displayed != 0U &&
@@ -1668,9 +1680,13 @@ static bool handle_settings(md_reader_t *self, const uint8_t *data,
     self->settings_received = 1U;
     self->brightness_lock = received[12] != 0U ? 1U : 0U;
     self->brightness_level = received[13] > 10U ? 10U : received[13];
-    diag(self, "settings: head=%u tilt=%u turn=%u flags=0x%x bright=%u/%u",
+    self->nod_threshold = read_u16(received + 14);
+    if (self->nod_threshold == 0U) self->nod_threshold = DEFAULT_NOD_THRESHOLD;
+    if (self->nod_threshold < 15U) self->nod_threshold = 15U;
+    diag(self, "settings: head=%u tilt=%u turn=%u nod=%u flags=0x%x bright=%u/%u",
          (unsigned int)data[2], (unsigned int)data[3], (unsigned int)read_u16(data + 8),
-         (unsigned int)data[10], (unsigned int)received[12], (unsigned int)received[13]);
+         (unsigned int)self->nod_threshold, (unsigned int)data[10],
+         (unsigned int)received[12], (unsigned int)received[13]);
     apply_brightness(self);
     self->head_enabled = data[2] != 0U ? 1U : 0U;
     self->pitch_threshold = data[3] < 3U ? 3U : (data[3] > 45U ? 45U : data[3]);
@@ -2094,6 +2110,7 @@ static gm_plugin_result_t on_start(void *opaque)
     self->arrow_elapsed = 0U;
     self->confirm_on_calibration = 0U;
     self->recentre_ms = 0U;
+    self->nod_threshold = DEFAULT_NOD_THRESHOLD;
     self->brightness_lock = 0U;
     self->brightness_level = 0U;
     self->brightness_blocked = 0U;

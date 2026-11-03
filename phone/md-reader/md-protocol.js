@@ -66,7 +66,7 @@ export function encodeWindow({ session, offset, final, links, bytes }) {
 }
 
 export function encodeSettings(settings) {
-  const { data, view } = header(14, 3);
+  const { data, view } = header(16, 3);
   let flags = 0;
   if (settings.invertPitch) flags |= settingFlags.invertPitch;
   if (settings.invertYaw) flags |= settingFlags.invertYaw;
@@ -86,6 +86,8 @@ export function encodeSettings(settings) {
   // Brightness: hold blocks automatic changes; level 0 keeps the current level.
   data[12] = settings.lockBrightness ? 1 : 0;
   data[13] = Math.max(0, Math.min(10, Math.round(settings.brightnessLevel ?? 0)));
+  // Nod speed needed to open a link (gentler than the link-turn threshold).
+  view.setUint16(14, Math.max(15, Math.min(2000, Math.round(settings.nodThreshold ?? 70))));
   return data;
 }
 

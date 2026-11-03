@@ -57,6 +57,7 @@ const settingInputs = {
   largeFont: $('#large-font'),
   gestureSleep: $('#gesture-sleep'),
   nodOpen: $('#nod-open'),
+  nodThreshold: $('#nod'),
   linkHighlight: $('#link-highlight'),
   lockBrightness: $('#lock-brightness'),
   brightnessLevel: $('#brightness'),
@@ -67,6 +68,7 @@ const settingOutputs = {
   pauseMs: [$('#pause-value'), (value) => `${(value / 1000).toFixed(1)} s`],
   brightnessLevel: [$('#brightness-value'), (value) => (value === 0 ? 'keep current' : `${value} of 10`)],
   turnThreshold: [$('#turn-value'), (value) => (value < 100 ? 'light' : value < 200 ? 'medium' : 'firm') + ` (${value})`],
+  nodThreshold: [$('#nod-value'), (value) => (value < 60 ? 'light' : value < 110 ? 'medium' : 'firm') + ` (${value})`],
 };
 
 let gm;

@@ -30,6 +30,8 @@ export const defaultSettings = Object.freeze({
   gestureSleep: true,
   // Nod (down and back up) to open the highlighted link.
   nodOpen: true,
+  // Up/down speed (raw gyro units) a nod needs; lower is gentler.
+  nodThreshold: 70,
   // How the highlighted link is drawn on the glasses: 'box' or 'inverted'.
   linkHighlight: 'box',
   brightnessLevel: 0,

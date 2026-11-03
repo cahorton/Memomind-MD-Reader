@@ -849,3 +849,72 @@ test('Recentre tilt counts down, then takes the pose you hold as straight ahead'
     sim.close();
   }
 });
+
+test('the tilt centre stays put while reading: no ratchet after page turns, no drift', async () => {
+  const { sim, controller, run, state } = await harness();
+  try {
+    await controller.open('Long.md');
+    // Page down five times, each time coming back up 5 degrees short.
+    for (let page = 1; page <= 5; page += 1) {
+      await run('IMU -20 0 0 0');
+      await run('TICK 500');
+      await run('IMU -5 0 0 0');
+      await run('TICK 1500');
+      assert.equal((await state()).pageIndex, page);
+    }
+    // Still the original centre: 14 degrees down pages, as on the first page.
+    await run('IMU -14 0 0 0');
+    await run('TICK 500');
+    assert.equal((await state()).pageIndex, 6);
+    await run('IMU 0 0 0 0');
+    await run('TICK 1500');
+
+    // Reading a little lower for a long time does not move the centre either.
+    await run('IMU -8 0 0 0');
+    await run('TICK 30000');
+    assert.equal((await state()).pageIndex, 6);
+    await run('IMU -14 0 0 0');
+    await run('TICK 500');
+    assert.equal((await state()).pageIndex, 7);
+  } finally {
+    sim.close();
+  }
+});
+
+test('a gentle nod opens the link; too gentle a move is logged with its speed', async () => {
+  const { sim, controller, run, state, diagnostics } = await harness();
+  try {
+    await controller.open('Short.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    // Speed 50 is below the default nod threshold of 70: logged, no open.
+    await run('IMU 0 0 0 -50');
+    await run('TICK 120');
+    await run('IMU 0 0 0 0');
+    await run('TICK 120');
+    await run('IMU 0 0 0 50');
+    await run('TICK 120');
+    await run('IMU 0 0 0 0');
+    await run('TICK 200');
+    assert.equal((await state()).title, 'Short');
+    assert.ok(diagnostics.includes('up/down move peaked at 50, nod needs 70'), diagnostics.join('\n'));
+    // Speed 90 (below the 120 link-turn threshold) is enough for a nod.
+    await run('IMU 0 0 0 -90');
+    await run('TICK 120');
+    await run('IMU 0 0 0 90');
+    await run('TICK 120');
+    assert.equal((await state()).title, 'Other');
+    // The slider is honoured.
+    await run('IMU 0 0 0 0');
+    await run('TICK 500');
+    await controller.applySettings({ nodThreshold: 120 });
+    await controller.open('Short.md');
+    await run(`BTN ${BUTTON.right} ${ACTION.trigger}`);
+    await run('IMU 0 0 0 -90');
+    await run('TICK 120');
+    await run('IMU 0 0 0 90');
+    await run('TICK 120');
+    assert.equal((await state()).title, 'Short');
+  } finally {
+    sim.close();
+  }
+});
